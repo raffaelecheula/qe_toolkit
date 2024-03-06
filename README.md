@@ -1,3 +1,3 @@
-# SHAPE
+# Quantum Espresso Toolkit.
 
-Tools for structure-dependent microkinetic modelling.
+Utilities for Quantum Espresso calculations.
