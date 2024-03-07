@@ -177,5 +177,26 @@ def get_vib_modes_animation(vib, kT=units.kB * 300, nimages=30):
     return animations
 
 # -----------------------------------------------------------------------------
+# WRITE ATOMS PICKLE
+# -----------------------------------------------------------------------------
+
+def write_atoms_pickle(atoms, filename):
+    """Write atoms data into pickle file."""
+    import pickle
+    with open(filename, "wb") as fileobj:
+        pickle.dump(atoms, fileobj)
+
+# -----------------------------------------------------------------------------
+# READ ATOMS PICKLE
+# -----------------------------------------------------------------------------
+
+def read_atoms_pickle(filename):
+    """Read atoms data from pickle file."""
+    import pickle
+    with open(filename, "rb") as fileobj:
+        atoms = pickle.load(fileobj)
+    return atoms
+
+# -----------------------------------------------------------------------------
 # END
 # -----------------------------------------------------------------------------

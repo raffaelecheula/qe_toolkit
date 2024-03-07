@@ -262,6 +262,10 @@ class ReadQeInp:
     def __init__(self, filename):
         self.filename = filename
         self.atoms = None
+        self.input_data = None
+        self.pseudos = None
+        self.kpts = None
+        self.koffset = None
         self.label = filename.split(".")[0]
 
     def get_data_pseudos_kpts(self):
@@ -287,6 +291,18 @@ class ReadQeInp:
         atoms = read_qe_out(self.filename)
         self.atoms = atoms
         return atoms
+
+    def update_atoms(self, atoms_new):
+        if self.atoms is None:
+            self.get_atoms()
+        if self.input_data is None:
+            self.get_data_pseudos_kpts()
+        if "calculation" in self.input_data:
+            if self.input_data["calculation"] in ("relax", "md", "vc-relax", "vc-md"):
+                self.atoms.set_positions(atoms_new.get_positions())
+            if self.input_data["calculation"] in ("vc-relax", "vc-md"):
+                self.atoms.set_cell(atoms_new.get_cell())
+        return self.atoms
 
     def get_input_data_dicts(self, remove_keywords=True):
         hubbard_U_dict = {}

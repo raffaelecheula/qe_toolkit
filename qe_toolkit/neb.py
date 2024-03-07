@@ -118,7 +118,7 @@ def read_neb_crd(images, filename="pwscf.crd"):
 # READ NEB PATH
 # -----------------------------------------------------------------------------
 
-def read_neb_path(images, filename="pwscf.path"):
+def read_neb_path(images, filename="pwscf.path", return_index_ts=False):
     """Read pwscf.path file from a NEB calculation."""
     units = create_units("2006")
     n_atoms = len(images[0])
@@ -138,10 +138,12 @@ def read_neb_path(images, filename="pwscf.path"):
                 [float(a)*units["Bohr"] for a in lines[index+2+j].split()[:3]]
             )
         images[i].positions = positions
-        images[i].potential_energy = energy
         images[i].calc = SinglePointDFTCalculator(images[i])
         images[i].calc.results.update({"energy": energy})
-    return images
+    if return_index_ts is True:
+        return np.argsort([atoms.get_potential_energy() for atoms in images])[-1]
+    else:
+        return images
 
 # -----------------------------------------------------------------------------
 # PRINT AXSF
@@ -294,32 +296,8 @@ def get_atoms_ts_from_neb(images, index_ts=None, mult_factor=0.01):
         vector += images[index_ts+1].positions - atoms_ts.positions
     vector /= np.linalg.norm(vector)
     vector *= mult_factor
-    return atoms_ts, vector
-
-# -----------------------------------------------------------------------------
-# WRITE DIMER PICKLE
-# -----------------------------------------------------------------------------
-
-def write_dimer_pickle(
-    atoms,
-    vector,
-    calc,
-    eigenmodes=None,
-    bond_indices=None,
-    filename="dimer.pickle",
-):
-
-    import pickle
-
-    param_dict = {
-        "atoms": atoms,
-        "eigenmodes": eigenmodes,
-        "vector": vector,
-        "calc": calc,
-        "bond_indices": bond_indices,
-    }
-    with open(filename, "wb") as fileobj:
-        pickle.dump(param_dict, fileobj)
+    atoms_ts.info["vector"] = vector
+    return atoms_ts
 
 # -----------------------------------------------------------------------------
 # END
