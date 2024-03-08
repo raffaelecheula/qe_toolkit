@@ -148,9 +148,6 @@ if atoms_to_vib == "all":
 elif atoms_to_vib == "only_relaxed":
     indices = get_atoms_not_fixed(atoms)
 
-elif "," in atoms_to_vib:
-    indices = [int(ii) for ii in atoms_to_vib.split(",")]
-
 elif ":" in atoms_to_vib:
     slices = atoms_to_vib.split(":")
     for ii in (0, 1):
@@ -166,6 +163,9 @@ elif "<" in atoms_to_vib:
     axis, dist = atoms_to_vib.split("<")
     ii = axis_dict[axis]
     indices = [a.index for a in atoms if a.position[ii] < float(dist)]
+
+else:
+    indices = [int(ii) for ii in atoms_to_vib.split(",")]
 
 atoms.set_constraint()
 
