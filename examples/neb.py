@@ -4,6 +4,7 @@
 # IMPORTS
 # -----------------------------------------------------------------------------
 
+import os
 import matplotlib
 matplotlib.use("Agg")
 import argparse
@@ -33,7 +34,7 @@ parser.add_argument(
     "-s",
     type=int,
     required=True,
-    help="Step of simulation.",
+    help="Step of simulation. (0, 1, 2): NEB. (-1): TS search. (-2): SCF.",
 )
 
 parser.add_argument(
@@ -141,8 +142,17 @@ elif parsed_args.step == -1:
         restart_mode="from_scratch",
         conv_thr=1e-08,
         electron_maxstep=500,
-        #tstress=True,
         tprnfor=True,
+    )
+    gamma = False
+    restart_from_crd = True
+
+elif parsed_args.step == -2:
+    neb_data_new = dict()
+    input_data_new = dict(
+        calculation="scf",
+        restart_mode="from_scratch",
+        electron_maxstep=500,
     )
     gamma = False
     restart_from_crd = True
@@ -225,10 +235,24 @@ if parsed_args.step == -1:
     images = read_neb_crd(images, filename_crd)
     atoms_ts = get_atoms_ts_from_neb(images, index_ts=index_ts)
     atoms_ts.calc = calc
+    os.makedirs('TS_search', exist_ok=True)
+    os.chdir('TS_search')
     write_atoms_pickle(
         atoms=atoms_ts,
         filename=filename_ts_search,
     )
+    os.chdir('..')
+
+elif parsed_args.step == -2:
+    index_ts = read_neb_path(images, filename=filename_path, return_index_ts=True)
+    images = read_neb_crd(images, filename_crd)
+    atoms_ts = get_atoms_ts_from_neb(images, index_ts=index_ts)
+    os.makedirs('TS_scf', exist_ok=True)
+    os.chdir('TS_scf')
+    calc.label = 'pw'
+    calc.write_input(atoms_ts)
+    os.chdir('..')
+
 else:
     write_neb_inp(
         neb_data=neb_data,
