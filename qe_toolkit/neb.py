@@ -125,21 +125,28 @@ def read_neb_path(images, filename="pwscf.path", return_index_ts=False):
     with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     indices = []
-    for i, line in enumerate(lines):
+    for ii, line in enumerate(lines):
         if "Image:" in line:
-            indices.append(i)
+            indices.append(ii)
         if "QUICK-MIN FIELDS" in line:
             break
-    for i, index in enumerate(indices):
+    for ii, index in enumerate(indices):
+        # Read energy.
         energy = float(lines[index + 1]) * units["Hartree"]
+        # Read positions.
         positions = []
-        for j in range(n_atoms):
-            positions.append(
-                [float(a)*units["Bohr"] for a in lines[index+2+j].split()[:3]]
-            )
-        images[i].positions = positions
-        images[i].calc = SinglePointDFTCalculator(images[i])
-        images[i].calc.results.update({"energy": energy})
+        for jj in range(n_atoms):
+            positions.append([float(pp) for pp in lines[index+2+jj].split()[:3]])
+        positions = np.array(positions)*units["Bohr"]
+        # Read forces.
+        forces = []
+        for jj in range(n_atoms):
+            forces.append([float(ff) for ff in lines[index+2+jj].split()[3:7]])
+        forces = np.array(forces) * units['Ry'] / units['Bohr']
+        # Update parameters.
+        images[ii].positions = positions
+        images[ii].calc = SinglePointDFTCalculator(images[ii])
+        images[ii].calc.results.update({"energy": energy, "forces": forces})
     if return_index_ts is True:
         return np.argsort([atoms.get_potential_energy() for atoms in images])[-1]
     else:

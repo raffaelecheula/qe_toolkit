@@ -27,58 +27,63 @@ def read_qe_out(filename="pw.pwo"):
     atoms = Atoms(pbc=True)
     cell = np.zeros((3, 3))
     energy = None
+    forces = None
     spin_pol_inp = False
     spin_pol_out = False
 
     with open(filename, "rU") as fileobj:
         lines = fileobj.readlines()
 
+    n_nrg = None
+    n_fin = None
+    n_forces = None
     n_mag_inp = []
-    for n, line in enumerate(lines):
+    for nn, line in enumerate(lines):
         if "positions (alat units)" in line:
             atomic_pos_units = "alat"
-            n_pos = n + 1
+            n_pos = nn + 1
         elif "ATOMIC_POSITIONS" in line and "crystal" in line:
             atomic_pos_units = "crystal"
-            n_pos = n + 1
+            n_pos = nn + 1
         elif "ATOMIC_POSITIONS" in line and "angstrom" in line:
             atomic_pos_units = "angstrom"
-            n_pos = n + 1
+            n_pos = nn + 1
         elif "celldm(1)" in line:
             celldm = float(line.split()[1]) * units["Bohr"]
         elif "crystal axes: (cart. coord. in units of alat)" in line:
             cell_units = "alat"
-            n_cell = n + 1
+            n_cell = nn + 1
         elif "CELL_PARAMETERS" in line and "angstrom" in line:
             cell_units = "angstrom"
-            n_cell = n + 1
+            n_cell = nn + 1
         elif "!" in line:
-            n_nrg = n
+            n_nrg = nn
         elif "Final energy" in line:
-            n_fin = n
+            n_fin = nn
         elif "Starting magnetic structure" in line and spin_pol_out is False:
             spin_pol_out = True
-            n_mag_out = n + 2
+            n_mag_out = nn + 2
         elif "starting_magnetization" in line:
             spin_pol_inp = True
-            n_mag_inp += [n]
+            n_mag_inp += [nn]
         elif "ATOMIC_SPECIES" in line:
-            n_atom_list = n + 1
+            n_atom_list = nn + 1
+        elif "Forces acting on atoms" in line:
+            n_forces = nn + 2
 
-    for i in range(3):
-        line = lines[n_cell + i]
+    for ii in range(3):
+        line = lines[n_cell + ii]
         if cell_units == "alat":
-            cell[i] = [float(c) * celldm for c in line.split()[3:6]]
+            cell[ii] = [float(cc) * celldm for cc in line.split()[3:6]]
         elif cell_units == "angstrom":
-            cell[i] = [float(c) for c in line.split()[:3]]
+            cell[ii] = [float(cc) for cc in line.split()[:3]]
 
     atoms.set_cell(cell)
     energy = None
-    try: energy = float(lines[n_nrg].split()[4]) * units["Ry"]
-    except: pass
-
-    try: energy = float(lines[n_fin].split()[3]) * units["Ry"]
-    except: pass
+    if n_nrg is not None:
+        energy = float(lines[n_nrg].split()[4]) * units["Ry"]
+    if n_fin is not None:
+        energy = float(lines[n_fin].split()[3]) * units["Ry"]
 
     index = 0
     indices = []
@@ -92,17 +97,17 @@ def read_qe_out(filename="pw.pwo"):
             if len(line.split()) == 0:
                 break
             atoms_list += [line.split()[0]]
-        for n in n_mag_inp:
+        for nn in n_mag_inp:
             num = ""
             read = False
-            for i in lines[n]:
-                if i == ")":
+            for ii in lines[nn]:
+                if ii == ")":
                     read = False
                 if read is True:
-                    num += i
-                if i == "(":
+                    num += ii
+                if ii == "(":
                     read = True
-            magmoms_dict[atoms_list[int(num) - 1]] = float(lines[n].split()[2])
+            magmoms_dict[atoms_list[int(num) - 1]] = float(lines[nn].split()[2])
 
     if spin_pol_out is True:
         for line in lines[n_mag_out:]:
@@ -115,19 +120,19 @@ def read_qe_out(filename="pw.pwo"):
             break
         if atomic_pos_units == "alat":
             name = line.split()[1]
-            positions = [[float(i) * celldm for i in line.split()[6:9]]]
+            positions = [[float(ii) * celldm for ii in line.split()[6:9]]]
             fix = [False, False, False]
         else:
             name = line.split()[0]
-            positions = [[float(i) for i in line.split()[1:4]]]
-            fix = [translate_constraints[int(i)] for i in line.split()[4:]]
+            positions = [[float(ii) for ii in line.split()[1:4]]]
+            fix = [translate_constraints[int(ii)] for ii in line.split()[4:]]
         symbol = ""
         magmom_tag = ""
-        for i in range(len(name)):
-            if name[i].isdigit():
-                magmom_tag += name[i]
+        for ii in range(len(name)):
+            if name[ii].isdigit():
+                magmom_tag += name[ii]
             else:
-                symbol += name[i]
+                symbol += name[ii]
         if spin_pol_inp is True or spin_pol_out is True:
             magmom = magmoms_dict[name]
             magmom *= SSSP_VALENCE[atomic_numbers[symbol]]
@@ -152,10 +157,19 @@ def read_qe_out(filename="pw.pwo"):
             constraints.append(FixCartesian([index], fix))
         index += 1
 
+    if n_forces is not None:
+        forces = []
+        for ii in range(len(atoms)):
+            line = lines[n_forces + ii]
+            forces.append([float(ff) for ff in line.split()[6:9]])
+        forces = np.array(forces) * units['Ry'] / units['Bohr']
+
     constraints.append(FixAtoms(indices=indices))
     atoms.set_constraint(constraints)
     atoms.calc = SinglePointDFTCalculator(atoms)
     atoms.calc.results.update({"energy": energy})
+    if forces is not None:
+        atoms.calc.results.update({"forces": forces})
 
     return atoms
 
@@ -344,12 +358,12 @@ class ReadQeInp:
         self.init_charges_dict = init_charges_dict
 
 # -----------------------------------------------------------------------------
-# UPDATE PSEUDOPOTENTIALS
+# UPDATE PSEUDOS
 # -----------------------------------------------------------------------------
 
 def update_pseudos(pseudos, filename):
     """Update pseudopotentials names."""
-    _, pseudos_new, _, _ = read_qe_inp(filename)
+    pseudos_new = read_qe_inp(filename)[1]
     pseudos.copy()
     pseudos.update(pseudos_new)
     return pseudos
