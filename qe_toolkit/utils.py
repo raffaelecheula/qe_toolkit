@@ -5,7 +5,6 @@
 import numpy as np
 from ase import units
 from ase import Atom, Atoms
-from ase.io.espresso import SSSP_VALENCE
 
 # -----------------------------------------------------------------------------
 # GET SYMBOLS LIST
@@ -87,6 +86,9 @@ def get_atoms_not_fixed(atoms, return_mask=False):
 
 def get_valence_electrons(atoms):
     """Get the valence electrons of an Atoms object."""
+    
+    from ase.io.espresso import SSSP_VALENCE
+    
     n_electrons = 0
     for a in atoms:
         n_electrons += SSSP_VALENCE[a.number]

@@ -7,7 +7,8 @@
 import os
 import argparse
 from distutils.util import strtobool
-from qe_toolkit.pp import write_pp_input
+from qe_toolkit.io import ReadQeInp
+from qe_toolkit.pp import write_pp_input, read_bader_charges
 
 # -----------------------------------------------------------------------------
 # PARSE ARGUMENTS
@@ -61,7 +62,24 @@ parser.add_argument(
     default=True,
 )
 
+parser.add_argument(
+    "--espresso_pwi",
+    "-pwi",
+    type=str,
+    required=False,
+    default="pw.pwi",
+    help="Quantum Espresso input file.",
+)
+
 parsed_args = parser.parse_args()
+
+# -----------------------------------------------------------------------------
+# READ INPUT FILE
+# -----------------------------------------------------------------------------
+
+if parsed_args.postprocess is True:
+    qe_inp = ReadQeInp(parsed_args.espresso_pwi)
+    atoms = qe_inp.get_atoms()
 
 # -----------------------------------------------------------------------------
 # CHANGE DIRECTORY
@@ -110,6 +128,13 @@ if parsed_args.run_qe_bin is True:
     os.system(f"{qe_path}pp.x < pp_val.pwi > pp_val.pwo")
     os.system(f"{qe_path}pp.x < pp_all.pwi > pp_all.pwo")
     os.system("bader pp_val.cube -ref pp_all.cube -vac auto > bader.out")
+
+# -----------------------------------------------------------------------------
+# POSTPROCESS
+# -----------------------------------------------------------------------------
+
+if parsed_args.postprocess is True:
+    read_bader_charges(atoms=atoms, filename="ACF.dat")
 
 # -----------------------------------------------------------------------------
 # CHANGE DIRECTORY

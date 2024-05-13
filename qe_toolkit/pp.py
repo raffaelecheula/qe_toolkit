@@ -549,5 +549,25 @@ def write_features_out(atoms, features_names, features, filename):
             print("", file=fileobj)
 
 # -----------------------------------------------------------------------------
+# READ BADER CHARGES
+# -----------------------------------------------------------------------------
+
+def read_bader_charges(atoms, filename="ACF.dat", filename_out="charges.txt"):
+    """Read Bader output and calculate charges"""
+    from ase.io.espresso import SSSP_VALENCE
+
+    charges = []
+    with open(filename, "r") as fileobj:
+        lines = fileobj.readlines()
+        for ii, line in enumerate(lines[2:2+len(atoms)]):
+            charges.append(float(line.split()[4])-SSSP_VALENCE[atoms[ii].number])
+    
+    with open(filename_out, "w") as fileobj:
+        for ii, atom in enumerate(atoms):
+            print(f"{ii:4d} {atom.symbol:4s} {charges[ii]:+7.4f}", file=fileobj)
+
+    return charges
+
+# -----------------------------------------------------------------------------
 # END
 # -----------------------------------------------------------------------------
