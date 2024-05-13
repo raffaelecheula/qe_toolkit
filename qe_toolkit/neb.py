@@ -5,7 +5,7 @@
 import os
 import numpy as np
 import copy as cp
-from ase import Atom, Atoms
+from ase import Atoms
 from ase.units import create_units
 from ase.calculators.singlepoint import SinglePointDFTCalculator
 from .utils import get_symbols_list
