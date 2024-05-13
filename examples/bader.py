@@ -63,6 +63,15 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    "--vacuum",
+    "-v",
+    type=str,
+    nargs=1,
+    required=False,
+    default="off",
+)
+
+parser.add_argument(
     "--espresso_pwi",
     "-pwi",
     type=str,
@@ -124,16 +133,17 @@ if parsed_args.write_input is True:
 # -----------------------------------------------------------------------------
 
 if parsed_args.run_qe_bin is True:
-    qe_path = parsed_args.qe_path
-    os.system(f"{qe_path}pp.x < pp_val.pwi > pp_val.pwo")
-    os.system(f"{qe_path}pp.x < pp_all.pwi > pp_all.pwo")
-    os.system("bader pp_val.cube -ref pp_all.cube -vac auto > bader.out")
+    os.system(f"{parsed_args.qe_path}pp.x < pp_val.pwi > pp_val.pwo")
+    os.system(f"{parsed_args.qe_path}pp.x < pp_all.pwi > pp_all.pwo")
 
 # -----------------------------------------------------------------------------
 # POSTPROCESS
 # -----------------------------------------------------------------------------
 
 if parsed_args.postprocess is True:
+    os.system(
+        f"bader pp_val.cube -ref pp_all.cube -vac {parsed_args.vacuum} > bader.out"
+    )
     read_bader_charges(atoms=atoms, filename="ACF.dat")
 
 # -----------------------------------------------------------------------------
