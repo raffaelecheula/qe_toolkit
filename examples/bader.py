@@ -66,7 +66,6 @@ parser.add_argument(
     "--vacuum",
     "-v",
     type=str,
-    nargs=1,
     required=False,
     default="off",
 )
