@@ -7,7 +7,7 @@ import re
 import pickle
 import numpy as np
 import copy as cp
-from ase import Atoms
+from ase import Atom, Atoms
 from ase.io.espresso import SSSP_VALENCE
 from ase.data import atomic_numbers
 from ase.units import create_units
