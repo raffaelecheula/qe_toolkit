@@ -566,6 +566,56 @@ class DielectricRegion:
         self.axis = axis
 
 # -----------------------------------------------------------------------------
+# READ AXSF
+# -----------------------------------------------------------------------------
+
+def read_axsf(filename):
+    """Read Xcrysden animation file."""
+    with open(filename, "rU") as fileobj:
+        lines = fileobj.readlines()
+
+    for line in lines:
+        if "PRIMCOORD" in line:
+            key = "PRIMCOORD"
+            break
+        elif "ATOMS" in line:
+            key = "ATOMS"
+            break
+
+    if key == "PRIMCOORD":
+        for n, line in enumerate(lines):
+            if "PRIMVEC" in line:
+                break
+        cell_vectors = np.zeros((3, 3))
+        for i, line in enumerate(lines[n + 1 : n + 4]):
+            entries = line.split()
+            cell_vectors[i][0] = float(entries[0])
+            cell_vectors[i][1] = float(entries[1])
+            cell_vectors[i][2] = float(entries[2])
+        atoms_zero = Atoms(cell=cell_vectors, pbc=(True, True, True))
+        increment = 2
+
+    elif key == "ATOMS":
+        atoms_zero = Atoms(pbc=(False, False, False))
+        increment = 1
+
+    key = "PRIMCOORD"
+    animation = []
+    for n, line in enumerate(lines):
+        if key in line:
+            atoms = Atoms(cell=cell_vectors, pbc=(True, True, True))
+            for line in lines[n + increment :]:
+                entr = line.split()
+                if entr[0] == key:
+                    break
+                symbol = entr[0]
+                position = (float(entr[1]), float(entr[2]), float(entr[3]))
+                atoms += Atom(symbol, position=position)
+            animation += [atoms]
+
+    return animation
+
+# -----------------------------------------------------------------------------
 # GET PSEUDOPOTENTIALS NAMES
 # -----------------------------------------------------------------------------
 
