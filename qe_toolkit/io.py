@@ -7,14 +7,89 @@ import re
 import pickle
 import numpy as np
 import copy as cp
+import os
+import warnings
 from ase import Atom, Atoms
-from ase.io.espresso import SSSP_VALENCE
+from ase.io import read
+from ase.io.espresso import read_fortran_namelist, get_atomic_species, SSSP_VALENCE
 from ase.data import atomic_numbers
 from ase.units import create_units
 from ase.constraints import FixAtoms, FixCartesian
 from ase.calculators.singlepoint import SinglePointDFTCalculator
 from ase.calculators.espresso import Espresso
 from .utils import get_symbols_list, get_symbols_dict
+
+
+# -----------------------------------------------------------------------------
+# READ QUANTUM ESPRESSO PWO
+# -----------------------------------------------------------------------------
+
+def read_pwo(
+    filename="pw.pwo",
+    index=None,
+    filepwi="pw.pwi",
+    path_head=None,
+    same_path_head=False,
+    **kwargs,
+):
+    """Read Quantum Espresso output file."""
+    if path_head is not None:
+        filename = os.path.join(path_head, filename)
+        filepwi = os.path.join(path_head, filepwi)
+    atoms_pwo = read(filename=filename, index=index, **kwargs)
+    is_list = True
+    if not isinstance(atoms_pwo, list):
+        atoms_pwo = [atoms_pwo]
+        is_list = False
+    # Override cell and constraints if filepwi is available.
+    if filepwi and os.path.isfile(filepwi):
+        for atoms in atoms_pwo:
+            atoms_pwi = read(filename=filepwi)
+            data, card_lines = read_fortran_namelist(fileobj=open(filepwi))
+            atoms.constraints = atoms_pwi.constraints
+            if "vc" not in data["control"].get("calculation", ""):
+                atoms.set_cell(atoms_pwi.get_cell())
+            # This is to not require a new calculation.
+            if atoms.calc:
+                atoms.calc.atoms = atoms
+    else:
+        warnings.warn(f"file {filepwi} not found!")
+    if is_list is False:
+        atoms_pwo = atoms_pwo[0]
+    return atoms_pwo
+
+# -----------------------------------------------------------------------------
+# READ QUANTUM ESPRESSO PWI
+# -----------------------------------------------------------------------------
+
+def read_pwi(filename="pw.pwi", path_head=None, **kwargs):
+    """Read Quantum Espresso input file."""
+    if path_head is not None:
+        filename = os.path.join(path_head, filename)
+    # Get atoms.
+    atoms = read(filename=filename, **kwargs)
+    # Get input_data.
+    data, card_lines = read_fortran_namelist(fileobj=open(filename))
+    input_data = {}
+    for key in data:
+        input_data.update(data[key])
+    atoms.info["input_data"] = input_data
+    # Get pseudopotentials.
+    species_card = get_atomic_species(card_lines, n_species=data['system']['ntyp'])
+    pseudopotentials = {}
+    for species in species_card:
+        pseudopotentials[species[0]] = species[2]
+    atoms.info["pseudopotentials"] = pseudopotentials
+    # Get kpts and koffset (gamma and automatic).
+    kpts = None
+    koffset = None
+    for ii, line in enumerate(card_lines):
+        if "K_POINTS" in line and "automatic" in line:
+            kpts = [int(ii) for ii in card_lines[ii+1].split()[:3]]
+            koffset = [int(ii) for ii in card_lines[ii+1].split()[3:]]
+    atoms.info["kpts"] = kpts
+    atoms.info["koffset"] = koffset
+    return atoms
 
 # -----------------------------------------------------------------------------
 # READ QUANTUM ESPRESSO OUT
@@ -417,14 +492,26 @@ def read_pw_bands(filename="pw.pwo", scale_band_energies=True):
 # ASSIGN HUBBARD U
 # -----------------------------------------------------------------------------
 
-def assign_hubbard_U(atoms, pw_data, hubbard_U_dict, hubbard_J0_dict=None):
+def assign_hubbard_U(
+    atoms,
+    pw_data,
+    hubbard_U_dict,
+    hubbard_J0_dict=None,
+    not_in_dict_ok=True,
+):
     """Assign Hubbard U parameters in pw parameters data."""
     symbols_list = get_symbols_list(atoms)
-    for i in range(len(symbols_list)):
-        symbol = symbols_list[i]
-        pw_data["Hubbard_U({})".format(i + 1)] = hubbard_U_dict[symbol]
+    for ii in range(len(symbols_list)):
+        symbol = symbols_list[ii]
+        if symbol not in hubbard_U_dict and not_in_dict_ok is True:
+            pw_data["Hubbard_U({})".format(ii + 1)] = 0.
+        else:
+            pw_data["Hubbard_U({})".format(ii + 1)] = hubbard_U_dict[symbol]
         if hubbard_J0_dict is not None:
-            pw_data["Hubbard_J0({})".format(i + 1)] = hubbard_J0_dict[symbol]
+            if symbol not in hubbard_J0_dict and not_in_dict_ok is True:
+                pw_data["Hubbard_J0({})".format(ii + 1)] = 0.
+            else:
+                pw_data["Hubbard_J0({})".format(ii + 1)] = hubbard_J0_dict[symbol]
     pw_data["lda_plus_u"] = True
     return pw_data
 

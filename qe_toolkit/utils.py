@@ -86,9 +86,7 @@ def get_atoms_not_fixed(atoms, return_mask=False):
 
 def get_valence_electrons(atoms):
     """Get the valence electrons of an Atoms object."""
-    
     from ase.io.espresso import SSSP_VALENCE
-    
     n_electrons = 0
     for a in atoms:
         n_electrons += SSSP_VALENCE[a.number]
@@ -107,10 +105,8 @@ def read_vib_energies(filename="vib.log", imaginary=False):
     fileobj.close()
 
     for i in range(3, len(lines)):
-
         if lines[i][0] == "-":
             break
-
         string = lines[i].split()[1]
         if string[-1] == "i":
             if imaginary is True:
@@ -128,22 +124,16 @@ def get_moments_of_inertia_xyz(atoms, center=None):
     """Get the moments of inertia of a molecule."""
     if center is None:
         center = atoms.get_center_of_mass()
-
     positions = atoms.get_positions() - center
     masses = atoms.get_masses()
+    inertia_moments = np.zeros(3)
+    for ii in range(len(atoms)):
+        xx, yy, zz = positions[ii]
+        inertia_moments[0] += masses[ii] * (yy ** 2 + zz ** 2)
+        inertia_moments[1] += masses[ii] * (xx ** 2 + zz ** 2)
+        inertia_moments[2] += masses[ii] * (xx ** 2 + yy ** 2)
 
-    I = np.zeros(3)
-
-    for i in range(len(atoms)):
-
-        x, y, z = positions[i]
-        m = masses[i]
-
-        I[0] += m * (y ** 2 + z ** 2)
-        I[1] += m * (x ** 2 + z ** 2)
-        I[2] += m * (x ** 2 + y ** 2)
-
-    return I
+    return inertia_moments
 
 # -----------------------------------------------------------------------------
 # SWAP ATOMS
