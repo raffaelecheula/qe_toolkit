@@ -34,8 +34,8 @@ def read_pwo(
 ):
     """Read Quantum Espresso output file."""
     if path_head is not None:
-        filename = os.path.join(path_head, filename)
-        filepwi = os.path.join(path_head, filepwi)
+        filename = os.path.join(path_head, os.path.split(filename)[1])
+        filepwi = os.path.join(path_head, os.path.split(filepwi)[1])
     atoms_pwo = read(filename=filename, index=index, **kwargs)
     is_list = True
     if not isinstance(atoms_pwo, list):
@@ -95,6 +95,7 @@ def read_pwi(filename="pw.pwi", path_head=None, **kwargs):
 # READ QUANTUM ESPRESSO OUT
 # -----------------------------------------------------------------------------
 
+# TODO: remove this.
 def read_qe_out(filename="pw.pwo"):
     """Read Quantum Espresso output."""
     units = create_units("2006")
@@ -252,6 +253,7 @@ def read_qe_out(filename="pw.pwo"):
 # READ QUANTUM ESPRESSO OUT
 # -----------------------------------------------------------------------------
 
+# TODO: remove this.
 class ReadQeOut:
     """Class to read Quantum Espresso output files."""
     def __init__(self, filename):
@@ -285,6 +287,7 @@ class ReadQeOut:
 # READ QUANTUM ESPRESSO INP
 # -----------------------------------------------------------------------------
 
+# TODO: remove this.
 def read_qe_inp(filename="pw.pwi"):
     """Read Quantum Espresso input."""
     with open(filename, "rU") as fileobj:
@@ -346,6 +349,7 @@ def read_qe_inp(filename="pw.pwi"):
 # READ QUANTUM ESPRESSO INP
 # -----------------------------------------------------------------------------
 
+# TODO: remove this.
 class ReadQeInp:
     """Class to read Quantum Espresso input files."""
     def __init__(self, filename):
@@ -436,6 +440,7 @@ class ReadQeInp:
 # UPDATE PSEUDOS
 # -----------------------------------------------------------------------------
 
+# TODO: remove this.
 def update_pseudos(pseudos, filename):
     """Update pseudopotentials names."""
     pseudos_new = read_qe_inp(filename)[1]
