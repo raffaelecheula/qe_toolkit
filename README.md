@@ -23,7 +23,8 @@ pip install -e .
 
 Requirements:
 - Python 3.5 or later
-- Dependencies managed through `setuptools` (see `install_requires` in `setup.py`).
+- Numpy
+- [ASE](https://wiki.fysik.dtu.dk/ase/)
 
 ## Usage
 
