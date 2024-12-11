@@ -129,11 +129,13 @@ input_data.update({
 })
 
 calc = Espresso(
-    input_data=input_data, pseudopotentials=pseudos, kpts=kpts, koffset=koffset,
+    input_data=input_data,
+    pseudopotentials=pseudos,
+    kpts=kpts,
+    koffset=koffset,
 )
 calc.label = "vib"
 calc.command = "mpirun pw.x -in PREFIX.pwi > PREFIX.pwo"
-
 atoms.calc = calc
 
 # -----------------------------------------------------------------------------

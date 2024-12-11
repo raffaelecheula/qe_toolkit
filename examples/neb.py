@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # IMPORTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 import os
 import matplotlib
@@ -13,7 +13,7 @@ from ase.optimize.lbfgs import LBFGS
 from ase.gui.gui import GUI
 from ase.io.animation import write_gif
 from ase.calculators.espresso import Espresso
-from qe_toolkit.io import read_qe_inp, read_qe_out
+from qe_toolkit.io import read_pwi, read_pwo
 from qe_toolkit.utils import swap_atoms, write_atoms_pickle
 from qe_toolkit.neb import (
     write_neb_inp,
@@ -23,9 +23,9 @@ from qe_toolkit.neb import (
     get_atoms_ts_from_neb,
 )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # PARSER
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 parser = argparse.ArgumentParser()
 
@@ -46,21 +46,37 @@ parser.add_argument(
     help="Maximum number of seconds.",
 )
 
+parser.add_argument(
+    "--qe_pwi",
+    "-pwi",
+    type=str,
+    required=False,
+    default="pw.pwi",
+    help="Quantum Espresso input file.",
+)
+
+parser.add_argument(
+    "--qe_pwo",
+    "-pwo",
+    type=str,
+    required=False,
+    default="pw.pwo",
+    help="Quantum Espresso output file.",
+)
+
 parsed_args = parser.parse_args()
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # CONTROL
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 reorder_atoms = False
 indices_swap = []
-intepol_method = "idpp"  # linear | idpp
+intepol_method = "idpp"
 steps_idpp = 1e3
 fmax_idpp = 1e-2
 
 n_images = 10
-espresso_pwi = "pw.pwi"
-espresso_pwo = "pw.pwo"
 filename_neb = "neb.pwi"
 filename_path = "pwscf.path"
 filename_crd = "pwscf.crd"
@@ -69,12 +85,12 @@ first_dir = "./first"
 last_dir = "./last"
 show_initial = False
 show_neb_path = False
-print_gif = True
+write_images = True
 repetitions_gif = (1, 1, 1)
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # STEPS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 if parsed_args.step == 0:
     neb_data_new = dict(
@@ -122,8 +138,8 @@ elif parsed_args.step == 2:
         opt_scheme="broyden",
         CI_scheme="auto",
         ds=1,
-        k_max=1.00,
-        k_min=0.40,
+        k_max=0.65,
+        k_min=0.30,
         path_thr=0.05,
         use_masses=False,
         use_freezing=False,
@@ -157,58 +173,64 @@ elif parsed_args.step == -2:
     gamma = False
     restart_from_crd = True
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # NEB
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-pwi_first = f"{first_dir}/{espresso_pwi}"
-input_data, pseudopotentials, kpts, koffset = read_qe_inp(pwi_first)
-
+# Read pwi input file.
+atoms = read_pwi(filename=parsed_args.qe_pwi, path_head=first_dir)
+input_data = atoms.info["input_data"]
+pseudopotentials = atoms.info["pseudopotentials"]
+kpts = atoms.info["kpts"]
+koffset = atoms.info["koffset"]
+# Update input data.
 del input_data["calculation"]
 del input_data["restart_mode"]
-
-input_data["scf_must_converge"] = False
-input_data["disk_io"] = "low"
-
+#input_data["scf_must_converge"] = False
+#input_data["disk_io"] = "low"
 input_data.update(input_data_new)
-
+# Update kpts.
 if gamma is True:
     kpts = None
     koffset = None
-
+# Setup espresso calculator.
 calc = Espresso(
     input_data=input_data,
     pseudopotentials=pseudopotentials,
     kpts=kpts,
     koffset=koffset,
 )
-
-atoms_first = read_qe_out(f"{first_dir}/{espresso_pwo}")
-atoms_last = read_qe_out(f"{last_dir}/{espresso_pwo}")
-
+# Read first and last images.
+atoms_first = read_pwo(
+    filename=parsed_args.qe_pwo,
+    filepwi=parsed_args.qe_pwi,
+    path_head=first_dir,
+)
+atoms_last = read_pwo(
+    filename=parsed_args.qe_pwo,
+    filepwi=parsed_args.qe_pwi,
+    path_head=last_dir,
+)
+# Reorder atoms.
 if reorder_atoms is True:
     atoms_first, atoms_last = reorder_atoms_neb(
         atoms_first=atoms_first,
         atoms_last=atoms_last,
     )
-
+# Swap atoms.
 if indices_swap:
     atoms_last = swap_atoms(
         atoms=atoms_last,
         indices_swap=indices_swap,
     )
-
+# Show first and last images.
 if show_initial is True:
-    try:
-        gui = GUI([atoms_first, atoms_last])
-        gui.run()
-    except:
-        pass
-
+    try: GUI([atoms_first, atoms_last]).run()
+    except: pass
+# Restart from crd file or interpolate images.
 images = [atoms_first]
 images += [atoms_first.copy() for i in range(n_images - 2)]
 images += [atoms_last]
-
 if restart_from_crd is True:
     images = read_neb_crd(images, filename_crd)
 else:
@@ -223,14 +245,9 @@ else:
             fmax=fmax_idpp,
             optimizer=LBFGS,
         )
-
-neb_data = dict(
-    string_method="neb",
-    num_of_images=n_images,
-)
-neb_data.update(neb_data_new)
-
+# Write input files.
 if parsed_args.step == -1:
+    # TS search calculation.
     index_ts = read_neb_path(images, filename=filename_path, return_index_ts=True)
     images = read_neb_crd(images, filename_crd)
     atoms_ts = get_atoms_ts_from_neb(images, index_ts=index_ts)
@@ -242,8 +259,8 @@ if parsed_args.step == -1:
         filename=filename_ts_search,
     )
     os.chdir('..')
-
 elif parsed_args.step == -2:
+    # SCF calculation.
     index_ts = read_neb_path(images, filename=filename_path, return_index_ts=True)
     images = read_neb_crd(images, filename_crd)
     atoms_ts = get_atoms_ts_from_neb(images, index_ts=index_ts)
@@ -252,8 +269,13 @@ elif parsed_args.step == -2:
     calc.label = 'pw'
     calc.write_input(atoms_ts)
     os.chdir('..')
-
 else:
+    # NEB calculation.
+    neb_data = dict(
+        string_method="neb",
+        num_of_images=n_images,
+    )
+    neb_data.update(neb_data_new)
     write_neb_inp(
         neb_data=neb_data,
         images=images,
@@ -261,18 +283,16 @@ else:
         filename=filename_neb,
     )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # SHOW NEB AND PRINT GIF
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
+# Show images.
 if show_neb_path is True:
-    try:
-        gui = GUI(images)
-        gui.run()
-    except:
-        pass
-
-if print_gif is True:
+    try: GUI(images).run()
+    except: pass
+# Write images.
+if write_images is True:
     for atoms in images:
         atoms *= repetitions_gif
     write_gif(
@@ -284,6 +304,6 @@ if print_gif is True:
         rotation="-90x,-30y,+45x",
     )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # END
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------

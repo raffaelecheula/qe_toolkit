@@ -17,8 +17,7 @@ from ase.units import create_units
 from ase.constraints import FixAtoms, FixCartesian
 from ase.calculators.singlepoint import SinglePointDFTCalculator
 from ase.calculators.espresso import Espresso
-from .utils import get_symbols_list, get_symbols_dict
-
+from qe_toolkit.utils import get_symbols_list, get_symbols_dict
 
 # -----------------------------------------------------------------------------
 # READ QUANTUM ESPRESSO PWO
@@ -43,9 +42,9 @@ def read_pwo(
         is_list = False
     # Override cell and constraints if filepwi is available.
     if filepwi and os.path.isfile(filepwi):
+        atoms_pwi = read(filename=filepwi)
+        data, card_lines = read_fortran_namelist(fileobj=open(filepwi))
         for atoms in atoms_pwo:
-            atoms_pwi = read(filename=filepwi)
-            data, card_lines = read_fortran_namelist(fileobj=open(filepwi))
             atoms.constraints = atoms_pwi.constraints
             if "vc" not in data["control"].get("calculation", ""):
                 atoms.set_cell(atoms_pwi.get_cell())

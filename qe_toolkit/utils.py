@@ -90,7 +90,6 @@ def get_valence_electrons(atoms):
     n_electrons = 0
     for a in atoms:
         n_electrons += SSSP_VALENCE[a.number]
-
     return n_electrons
 
 # -----------------------------------------------------------------------------
@@ -103,7 +102,6 @@ def read_vib_energies(filename="vib.log", imaginary=False):
     fileobj = open(filename, "rU")
     lines = fileobj.readlines()
     fileobj.close()
-
     for i in range(3, len(lines)):
         if lines[i][0] == "-":
             break
@@ -113,7 +111,6 @@ def read_vib_energies(filename="vib.log", imaginary=False):
                 vib_energies.append(complex(0.0, float(string[:-1]) * 1e-3))
         else:
             vib_energies.append(complex(float(string) * 1e-3))
-
     return vib_energies
 
 # -----------------------------------------------------------------------------
@@ -132,7 +129,6 @@ def get_moments_of_inertia_xyz(atoms, center=None):
         inertia_moments[0] += masses[ii] * (yy ** 2 + zz ** 2)
         inertia_moments[1] += masses[ii] * (xx ** 2 + zz ** 2)
         inertia_moments[2] += masses[ii] * (xx ** 2 + yy ** 2)
-
     return inertia_moments
 
 # -----------------------------------------------------------------------------
@@ -145,7 +141,6 @@ def swap_atoms(atoms, indices_swap):
     for ind in indices_swap:
         indices[ind[0]], indices[ind[1]] = indices[ind[1]], indices[ind[0]]
     atoms = atoms[indices]
-
     return atoms
 
 # -----------------------------------------------------------------------------

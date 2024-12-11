@@ -5,8 +5,8 @@
 import pickle
 import numpy as np
 import copy as cp
-from .io import read_pw_bands, write_pp_input
-from .utils import get_symbols_list, get_symbols_dict
+from qe_toolkit.io import read_pw_bands, write_pp_input
+from qe_toolkit.utils import get_symbols_list, get_symbols_dict
 
 # -----------------------------------------------------------------------------
 # CREATE PP_INP
@@ -79,7 +79,6 @@ def merge_charge_files(files_in, file_out):
     for num, filename in enumerate(files_in):
         with open(filename, "rU") as fileobj:
             lines = fileobj.readlines()
-
         if num == 0:
             new_lines = cp.deepcopy(lines)
             for n, line in enumerate(lines):
@@ -90,7 +89,6 @@ def merge_charge_files(files_in, file_out):
             n_grid = [int(n) for n in lines[n_den + 3].split()]
             n_points = n_grid[0] * n_grid[1] * n_grid[2]
             density = np.zeros(n_points)
-
         i = 0
         for line in lines[n_den + 8 : n_end]:
             for l in line.split():
@@ -114,23 +112,18 @@ def merge_charge_files(files_in, file_out):
 
 class State:
     def __init__(self, state_num, atom_num, element, shell_num, l, m):
-
         self.state_num = state_num
         self.element = element
         self.atom_num = atom_num
         self.shell_num = shell_num
         self.l = l
         self.m = m
-
         p_dict = {1: "p z", 2: "p x", 3: "p y"}
         d_dict = {1: "d z^2", 2: "d zx", 3: "d zy", 4: "d x^2-y^2", 5: "d xy"}
-
         if l == 0:
             self.orbital = "s"
-
         elif l == 1:
             self.orbital = p_dict[self.m]
-
         elif l == 2:
             self.orbital = d_dict[self.m]
 
@@ -140,7 +133,6 @@ class State:
 
 class Band:
     def __init__(self, band_num, energy, state_nums, weights):
-
         self.band_num = band_num
         self.energy = energy
         self.state_nums = state_nums
@@ -160,7 +152,6 @@ class AtomPP:
         weights=[],
         color=None,
     ):
-
         self.atom_num = atom_num
         self.element = element
         self.states = states
@@ -176,7 +167,6 @@ def read_projwfc(filename, kpoint, print_summary=False):
     """Read Quantum Espreso projwfc output."""
     with open(filename, "rU") as fileobj:
         lines = fileobj.readlines()
-
     states_list = []
     bands_list = []
     read = False
@@ -233,10 +223,8 @@ def read_projwfc(filename, kpoint, print_summary=False):
                 energy = float(line[8:20])
                 weights = []
                 state_nums = []
-
     if print_summary is True:
         print(f"n states = {len(states_list)} - n bands = {len(bands_list)}")
-
     return states_list, bands_list
 
 # -----------------------------------------------------------------------------
@@ -247,7 +235,6 @@ def scale_band_energies(band_list, e_fermi):
     """Scale band energies with the Fermi energy."""
     for band in band_list:
         band.energy -= e_fermi
-
     return band_list
 
 # -----------------------------------------------------------------------------
@@ -259,13 +246,10 @@ def get_atoms_details(
 ):
     """Get the details of atoms from post-processing calculations."""
     atoms_pp_list = []
-
     for atom_num in atom_num_list:
-
         states = [s for s in states_list if s.atom_num == atom_num]
         element = states[0].element
         color = color_dict[element] if color_dict is not None else None
-
         atom = AtomPP(
             atom_num=atom_num,
             element=element,
@@ -275,7 +259,6 @@ def get_atoms_details(
             color=color,
         )
         atoms_pp_list += [atom]
-
         for band in bands_list:
             for state in states:
                 if state.state_num in band.state_nums:
@@ -285,7 +268,6 @@ def get_atoms_details(
                         atom.states += [state]
                         atom.bands += [band]
                         atom.weights += [weight]
-
     return atoms_pp_list
 
 # -----------------------------------------------------------------------------
@@ -295,7 +277,6 @@ def get_atoms_details(
 def print_atoms_details(atoms_pp_list, filename="atom_details.out"):
     """Print the details of atoms from post-processing calculations."""
     fileobj = open(filename, "w+")
-
     count_bands = {}
     for atom in atoms_pp_list:
         atom_num = atom.atom_num
@@ -318,9 +299,7 @@ def print_atoms_details(atoms_pp_list, filename="atom_details.out"):
                     count_bands[band.band_num] += [state.atom_num]
             except:
                 count_bands[band.band_num] = [state.atom_num]
-
     print("\n SHARED BANDS \n", file=fileobj)
-
     for num in sorted([n for n in count_bands if len(count_bands[n]) > 1]):
         all_bands = sum([a.bands for a in atoms_pp_list], [])
         band = [b for b in all_bands if b.band_num == num][0]
@@ -329,7 +308,6 @@ def print_atoms_details(atoms_pp_list, filename="atom_details.out"):
             atom = [a for a in atoms_pp_list if a.atom_num == atom_num][0]
             string += " {0:2s}{1:3d}  - ".format(atom.element, atom_num)
         print(string[:-2], file=fileobj)
-
     print("", file=fileobj)
     fileobj.close()
 
@@ -342,14 +320,11 @@ def plot_band_levels(
 ):
     """Plot the band levels."""
     import matplotlib.pyplot as plt
-
     fig = plt.figure(0)
     if bands_energies is not None:
         for energy in bands_energies:
             plt.plot([0.0, 1.0], [energy] * 2, color="whitesmoke")
-
     weight_cum = {}
-
     for atom in atoms_pp_list:
         color = atom.color
         for i in range(len(atom.bands)):
@@ -363,16 +338,13 @@ def plot_band_levels(
                 weight_cum[band] = weight
             w_max = weight_cum[band]
             plt.plot([w_min, w_max], [band.energy] * 2, color=color)
-
     for band in weight_cum:
         if weight_cum[band] > num_min_print and e_min < band.energy < e_max:
             x_text = 1.01
             y_text = band.energy - 0.05
             plt.text(x_text, y_text, band.band_num, size="xx-small")
-
     plt.xlim([0.0, 1.0])
     plt.ylim([e_min, e_max])
-
     return fig
 
 # -----------------------------------------------------------------------------
@@ -383,18 +355,15 @@ def get_dos(filename):
     """Get dos from output."""
     with open(filename, "rU") as fileobj:
         lines = fileobj.readlines()
-
     if "dosup(E)" in lines[0]:
         nspin = 2
     else:
         nspin = 1
-
     energy = np.zeros(len(lines) - 1)
     if nspin == 2:
         dos = np.zeros((len(lines) - 1, 2))
     else:
         dos = np.zeros(len(lines) - 1)
-
     e_fermi = float(lines[0].split()[-2])
     for i, line in enumerate(lines[1:]):
         energy[i] = float(line.split()[0]) - e_fermi
@@ -403,7 +372,6 @@ def get_dos(filename):
             dos[i, 1] = float(line.split()[2])
         else:
             dos[i] = float(line.split()[1])
-
     return energy, dos
 
 # -----------------------------------------------------------------------------
@@ -414,18 +382,15 @@ def get_pdos(filename, e_fermi):
     """Get pdos from output."""
     with open(filename, "rU") as fileobj:
         lines = fileobj.readlines()
-
     if "dosup(E)" in lines[0] or "ldosup(E)" in lines[0]:
         nspin = 2
     else:
         nspin = 1
-
     energy = np.zeros(len(lines) - 1)
     if nspin == 2:
         pdos = np.zeros((len(lines) - 1, 2))
     else:
         pdos = np.zeros(len(lines) - 1)
-
     for i, line in enumerate(lines[1:]):
         energy[i] = float(line.split()[0]) - e_fermi
         if nspin == 2:
@@ -433,7 +398,6 @@ def get_pdos(filename, e_fermi):
             pdos[i, 1] = float(line.split()[2])
         else:
             pdos[i] = float(line.split()[1])
-
     return energy, pdos
 
 # -----------------------------------------------------------------------------
@@ -460,7 +424,6 @@ def get_pdos_vect(atoms, e_fermi, filename="projwfc.pwo"):
                 pdos_vect[atom_num - 1][orbital_type] += pdos
             else:
                 pdos_vect[atom_num - 1][orbital_type] = pdos
-
     return energy, pdos_vect
 
 # -----------------------------------------------------------------------------
@@ -474,21 +437,17 @@ def get_features_bands(
     i_zero = np.argmin(np.abs(energy))
     i_minus = np.argmin(np.abs(energy + delta_e))
     i_plus = np.argmin(np.abs(energy - delta_e))
-
     features = np.zeros((len(atoms), 8))
-
     for i, _ in enumerate(atoms):
         pdos_dict = pdos_vect[i]
         for orbital in pdos_dict:
             if len(pdos_dict[orbital].shape) > 1:
                 pdos_dict[orbital] = np.sum(pdos_dict[orbital], axis=1)
-
         pdos_sp = pdos_dict["s"]
         pdos_sp += pdos_dict["p"]
         pdos_sp = pdos_dict["p"]
         sp_filling = np.trapz(y=pdos_sp[:i_zero], x=energy[:i_zero])
         sp_density = np.sum(pdos_sp[i_minus:i_plus]) / len(pdos_sp[i_minus:i_plus])
-
         if "d" in pdos_dict:
             pdos_d = pdos_dict["d"]
             d_filling = np.trapz(y=pdos_d[:i_zero], x=energy[:i_zero])
@@ -513,7 +472,6 @@ def get_features_bands(
             d_width = np.nan
             d_skewness = np.nan
             d_kurtosis = np.nan
-
         features[i, 0] = d_filling
         features[i, 1] = d_centre
         features[i, 2] = d_width
@@ -522,11 +480,9 @@ def get_features_bands(
         features[i, 5] = sp_filling
         features[i, 6] = d_density
         features[i, 7] = sp_density
-
         if save_pickle is True:
             with open("features_bands.pickle", "wb") as fileobj:
                 pickle.dump(features, fileobj)
-
     return features
 
 # -----------------------------------------------------------------------------
@@ -555,7 +511,6 @@ def write_features_out(atoms, features_names, features, filename):
 def read_bader_charges(atoms, filename="ACF.dat", filename_out="charges.txt"):
     """Read Bader output and calculate charges"""
     from ase.io.espresso import SSSP_VALENCE
-
     charges = []
     with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
@@ -565,7 +520,6 @@ def read_bader_charges(atoms, filename="ACF.dat", filename_out="charges.txt"):
     with open(filename_out, "w") as fileobj:
         for ii, atom in enumerate(atoms):
             print(f"{ii:4d} {atom.symbol:4s} {charges[ii]:+7.4f}", file=fileobj)
-
     return charges
 
 # -----------------------------------------------------------------------------

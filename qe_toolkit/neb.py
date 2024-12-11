@@ -8,7 +8,7 @@ import copy as cp
 from ase import Atoms
 from ase.units import create_units
 from ase.calculators.singlepoint import SinglePointDFTCalculator
-from .utils import get_symbols_list
+from qe_toolkit.utils import get_symbols_list
 
 # -----------------------------------------------------------------------------
 # WRITE NEB DAT
@@ -37,12 +37,9 @@ def write_neb_dat(neb_data, filename="neb.dat", mode="w+"):
         "fcp_tot_charge_first": None,
         "fcp_tot_charge_last": None,
     }
-
     for arg in neb_data:
         neb_dict[arg] = neb_data[arg]
-
     with open(filename, mode) as f:
-
         f.write("&PATH\n")
         for arg in [arg for arg in neb_dict if neb_dict[arg] is not None]:
             if isinstance(neb_dict[arg], str):
@@ -62,11 +59,9 @@ def write_neb_inp(neb_data, images, calc, filename="neb.pwi"):
     """Write the input file for a NEB calculation."""
     calc = cp.deepcopy(calc)
     calc.label = "tmp"
-
     with open(filename, "w+") as f:
         f.write("BEGIN\n")
         f.write("BEGIN_PATH_INPUT\n")
-
     write_neb_dat(neb_data, filename, mode="a+")
     with open(filename, "a+") as f:
         f.write("\nEND_PATH_INPUT\n")
@@ -89,9 +84,7 @@ def write_neb_inp(neb_data, images, calc, filename="neb.pwi"):
                 f.write("INTERMEDIATE_IMAGE\n")
             for line in lines[n:]:
                 f.write(line)
-
         os.remove("tmp.pwi")
-
         f.write("END_POSITIONS\n")
         f.write("END_ENGINE_INPUT\n")
         f.write("END\n")
@@ -159,17 +152,14 @@ def read_neb_path(images, filename="pwscf.path", return_index_ts=False):
 def print_axsf(filename, animation, variable_cell=False):
     """Print file for visualization of an animation in Xcrysden."""
     f = open(filename, "w+")
-
     print(" ANIMSTEP", len(animation), file=f)
     print(" CRYSTAL", file=f)
-
     if variable_cell is False:
         cell = animation[0].cell
         print(" PRIMVEC", file=f)
         print("{0:14.8f} {1:14.8f} {2:14.8f}".format(*cell[0]), file=f)
         print("{0:14.8f} {1:14.8f} {2:14.8f}".format(*cell[1]), file=f)
         print("{0:14.8f} {1:14.8f} {2:14.8f}".format(*cell[2]), file=f)
-
     for i, atoms in enumerate(animation):
         if variable_cell is True:
             cell = atoms.cell
@@ -232,9 +222,7 @@ def reorder_atoms_neb(atoms_first, atoms_last):
             dist_matrix[:, match_new] = np.inf
             for uu in unassigned_atoms:
                 dist_argmin[uu] = np.argmin(dist_matrix[uu, :])
-
     atoms_last = atoms_last[[int(ii) for ii in dist_argmin]]
-
     return atoms_first, atoms_last
 
 # -----------------------------------------------------------------------------

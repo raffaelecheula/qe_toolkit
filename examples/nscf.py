@@ -1,20 +1,19 @@
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # IMPORTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 import os
 import argparse
 import matplotlib.pyplot as plt
 from distutils.util import strtobool
 from ase.calculators.espresso import Espresso
-from qe_toolkit.io import ReadQeOut, ReadQeInp
+from qe_toolkit.io import read_pwi, read_pwo
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # PARSE ARGUMENTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 parser = argparse.ArgumentParser()
-
 fbool = lambda x: bool(strtobool(x))
 
 parser.add_argument(
@@ -26,7 +25,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--espresso_pwi",
+    "--qe_pwi",
     "-pwi",
     type=str,
     required=False,
@@ -35,12 +34,20 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--espresso_pwo",
+    "--qe_pwo",
     "-pwo",
     type=str,
     required=False,
     default="pw.pwo",
     help="Quantum Espresso output file.",
+)
+
+parser.add_argument(
+    "--mpi_cmd",
+    "-mc",
+    type=str,
+    required=False,
+    default="module load intel/2020.1 openmpi/4.0.3 && mpirun",
 )
 
 parser.add_argument(
@@ -53,22 +60,26 @@ parser.add_argument(
 
 parsed_args = parser.parse_args()
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # NSCF
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-qe_inp = ReadQeInp(parsed_args.espresso_pwi)
-input_data, pseudos, kpts, koffset = qe_inp.get_data_pseudos_kpts()
-atoms = qe_inp.get_atoms()
-if "calculation" in input_data:
-    qe_out = ReadQeOut(parsed_args.espresso_pwo)
-    atoms = qe_inp.update_atoms(qe_out.get_atoms())
-
-if parsed_args.kpts != "":
-    kpts_new = [int(i) for i in parsed_args.kpts.split(",")]
+# Read pwi input file.
+atoms = read_pwi(filename=parsed_args.qe_pwi)
+input_data = atoms.info["input_data"]
+pseudopotentials = atoms.info["pseudopotentials"]
+kpts = atoms.info["kpts"]
+koffset = atoms.info["koffset"]
+# Read pwo output file.
+atoms = read_pwo(filename=parsed_args.qe_pwo, filepwi=parsed_args.qe_pwi)
+# Update kpts.
+if parsed_args.kpts == "auto":
+    kpts_new = [int(60 / atoms.cell.lengths()[ii]) for ii in range(3)]
+elif parsed_args.kpts != "":
+    kpts_new = [int(ii) for ii in parsed_args.kpts.split(",")]
 else:
     kpts_new = kpts
-
+# Update input data.
 input_data_nscf = input_data.copy()
 input_data_nscf.update({
     "restart_mode": "from_scratch",
@@ -82,26 +93,25 @@ input_data_nscf.update({
 input_data_nscf.pop("smearing", None)
 input_data_nscf.pop("degauss", None)
 input_data_nscf.pop("max_seconds", None)
-
+# Write input file for nscf.
 calc = Espresso(
     input_data=input_data,
-    pseudopotentials=pseudos,
+    pseudopotentials=pseudopotentials,
     kpts=kpts,
     koffset=koffset,
     label="nscf",
 )
-
 calc.set(input_data=input_data_nscf)
 calc.set(kpts=kpts_new)
 calc.write_input(atoms)
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # RUN PROJWFC
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 if parsed_args.run_qe_bin is True:
-    os.system(f"srun pw.x < nscf.pwi > nscf.pwo")
+    os.system(parsed_args.mpi_cmd + " pw.x < nscf.pwi > nscf.pwo")
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # END
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
