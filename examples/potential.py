@@ -104,6 +104,14 @@ parser.add_argument(
     default=True,
 )
 
+parser.add_argument(
+    "--dipole_correction",
+    "-dc",
+    type=fbool,
+    required=False,
+    default=False,
+)
+
 parsed_args = parser.parse_args()
 
 # -------------------------------------------------------------------------------------
@@ -142,6 +150,13 @@ if parsed_args.write_input is True:
             "restart_mode": "from_scratch",
             "calculation": "scf",
         })
+        if parsed_args.dipole_correction is True:
+            input_data.update({
+                "tefield": True,
+                "dipfield": True,
+                "emaxpos": 0.90,
+                "eopreg": 0.05,
+            })
         # Write input data for scf.
         calc = Espresso(
             input_data=input_data,

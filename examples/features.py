@@ -140,7 +140,10 @@ for i, atom in enumerate(atoms):
     features_const[i, 1] = elem.en_pauling
     features_const[i, 2] = elem.ionenergies[1]
     if parsed_args.structure in ("slab", "bulk"):
-        features_const[i, 3] = elem.metallic_radius * 0.01
+        if elem.metallic_radius:
+            features_const[i, 3] = elem.metallic_radius * 0.01
+        else:
+            features_const[i, 3] = np.nan
     else:
         features_const[i, 3] = np.nan
 
