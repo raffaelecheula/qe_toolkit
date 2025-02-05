@@ -99,7 +99,7 @@ def get_valence_electrons(atoms):
 def read_vib_energies(filename="vib.log", imaginary=False):
     """Read the vibrational energies from a log file."""
     vib_energies = []
-    fileobj = open(filename, "rU")
+    fileobj = open(filename, "r")
     lines = fileobj.readlines()
     fileobj.close()
     for i in range(3, len(lines)):

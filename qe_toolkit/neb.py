@@ -68,7 +68,7 @@ def write_neb_inp(neb_data, images, calc, filename="neb.pwi"):
         f.write("BEGIN_ENGINE_INPUT\n")
         for i in range(len(images)):
             calc.write_input(images[i])
-            with open("tmp.pwi", "rU") as g:
+            with open("tmp.pwi", "r") as g:
                 lines = g.readlines()
             for n, line in enumerate(lines):
                 if "ATOMIC_POSITIONS" in line:
@@ -95,7 +95,7 @@ def write_neb_inp(neb_data, images, calc, filename="neb.pwi"):
 
 def read_neb_crd(images, filename="pwscf.crd"):
     """Read pwscf.crd file from a NEB calculation."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     n_atoms = len(images[0])
     num = 2

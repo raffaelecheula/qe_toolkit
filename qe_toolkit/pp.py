@@ -77,7 +77,7 @@ def create_pp_inp(
 def merge_charge_files(files_in, file_out):
     """Merge two charge files."""
     for num, filename in enumerate(files_in):
-        with open(filename, "rU") as fileobj:
+        with open(filename, "r") as fileobj:
             lines = fileobj.readlines()
         if num == 0:
             new_lines = cp.deepcopy(lines)
@@ -165,7 +165,7 @@ class AtomPP:
 
 def read_projwfc(filename, kpoint, print_summary=False):
     """Read Quantum Espreso projwfc output."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     states_list = []
     bands_list = []
@@ -353,7 +353,7 @@ def plot_band_levels(
 
 def get_dos(filename):
     """Get dos from output."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     if "dosup(E)" in lines[0]:
         nspin = 2
@@ -380,7 +380,7 @@ def get_dos(filename):
 
 def get_pdos(filename, e_fermi):
     """Get pdos from output."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     if "dosup(E)" in lines[0] or "ldosup(E)" in lines[0]:
         nspin = 2

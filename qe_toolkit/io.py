@@ -106,7 +106,7 @@ def read_qe_out(filename="pw.pwo"):
     spin_pol_inp = False
     spin_pol_out = False
 
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
 
     n_nrg = None
@@ -289,7 +289,7 @@ class ReadQeOut:
 # TODO: remove this.
 def read_qe_inp(filename="pw.pwi"):
     """Read Quantum Espresso input."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     n_as = 0
     n_kp = 0
@@ -453,7 +453,7 @@ def update_pseudos(pseudos, filename):
 
 def read_pw_bands(filename="pw.pwo", scale_band_energies=True):
     """Read bands from Quantum Espresso output."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
     kpt = 0
     e_bands_dict = {}
@@ -662,7 +662,7 @@ class DielectricRegion:
 
 def read_axsf(filename):
     """Read Xcrysden animation file."""
-    with open(filename, "rU") as fileobj:
+    with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
 
     for line in lines:

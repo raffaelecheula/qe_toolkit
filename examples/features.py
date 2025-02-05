@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # IMPORTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 import os
 import argparse
@@ -12,12 +12,12 @@ import numpy as np
 from distutils.util import strtobool
 from mendeleev import element
 from dscribe.descriptors import SOAP
-from qe_toolkit.io import ReadQeInp, ReadQeOut
+from qe_toolkit.io import read_pwi, read_pwo, read_pw_bands
 from qe_toolkit.pp import write_features_out
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # PARSE ARGUMENTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 parser = argparse.ArgumentParser()
 
@@ -48,31 +48,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--nodes",
-    "-n",
-    type=str,
-    required=False,
-    default="none",
-)
-
-parser.add_argument(
-    "--time",
-    "-t",
-    type=str,
-    required=False,
-    default="none",
-)
-
-parser.add_argument(
-    "--partition",
-    "-p",
-    type=str,
-    required=False,
-    default="none",
-)
-
-parser.add_argument(
-    "--espresso_pwi",
+    "--qe_pwi",
     "-pwi",
     type=str,
     required=False,
@@ -81,7 +57,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--espresso_pwo",
+    "--qe_pwo",
     "-pwo",
     type=str,
     required=False,
@@ -91,9 +67,9 @@ parser.add_argument(
 
 parsed_args = parser.parse_args()
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # WRITE OUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 if parsed_args.write_out is True:
 
@@ -121,50 +97,41 @@ if parsed_args.write_out is True:
     if os.path.exists("features.out"):
         os.remove("features.out")
 
-# -----------------------------------------------------------------------------
-# RUN CALCULATIONS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# READ OUTPUT FILES
+# -------------------------------------------------------------------------------------
 
-args_str = ""
-if parsed_args.nodes != "none":
-    args_str += f" -n={parsed_args.nodes}"
-if parsed_args.time != "none":
-    args_str += f" -t={parsed_args.time}"
-if parsed_args.partition != "none":
-    args_str += f" -p={parsed_args.partition}"
+atoms = read_pwi(filename=parsed_args.qe_pwi)
+input_data = atoms.info["input_data"]
+pseudopotentials = atoms.info["pseudopotentials"]
+
+atoms = read_pwo(
+    filename=parsed_args.qe_pwo,
+    filepwi=parsed_args.qe_pwi,
+)
 
 if parsed_args.structure == "slab":
     finished = True
     if not os.path.isfile("features_bands.pickle"):
+        print("Missing file: features_bands.pickle")
         finished = False
-        sp = subprocess.Popen(["/bin/bash", "-i", "-c", f"run projwfc {args_str}"])
-        sp.communicate()
     if not os.path.isfile("workfunction.pickle"):
+        print("Missing file: workfunction.pickle")
         finished = False
-        sp = subprocess.Popen(["/bin/bash", "-i", "-c", f"run potential {args_str}"])
-        sp.communicate()
     if finished is False:
         exit()
 
 elif parsed_args.structure == "bulk":
     finished = True
     if not os.path.isfile("features_bands.pickle"):
+        print("Missing file: features_bands.pickle")
         finished = False
-        sp = subprocess.Popen(["/bin/bash", "-i", "-c", f"run projwfc {args_str}"])
-        sp.communicate()
     if finished is False:
         exit()
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # CONSTANTS
-# -----------------------------------------------------------------------------
-
-qe_inp = ReadQeInp(parsed_args.espresso_pwi)
-input_data, pseudos, kpts, koffset = qe_inp.get_data_pseudos_kpts()
-atoms = qe_inp.get_atoms()
-if "calculation" in input_data:
-    qe_out = ReadQeOut(parsed_args.espresso_pwo)
-    atoms = qe_inp.update_atoms(qe_out.get_atoms())
+# -------------------------------------------------------------------------------------
 
 features_const = np.zeros((len(atoms), 4))
 for i, atom in enumerate(atoms):
@@ -177,51 +144,42 @@ for i, atom in enumerate(atoms):
     else:
         features_const[i, 3] = np.nan
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # PROJWFC AND POTENTIAL
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 if parsed_args.structure == "slab":
-
     with open("features_bands.pickle", "rb") as fileobj:
         features_bands = pickle.load(fileobj)
-
     with open("workfunction.pickle", "rb") as fileobj:
         workfunction = pickle.load(fileobj)
     features_workfunction = np.zeros((len(atoms), 1))
     features_workfunction[:] = workfunction
-
     features_homolumo = np.zeros((len(atoms), 2))
     features_homolumo[:] = np.nan
 
 elif parsed_args.structure == "bulk":
-
     with open("features_bands.pickle", "rb") as fileobj:
         features_bands = pickle.load(fileobj)
-
     features_workfunction = np.zeros((len(atoms), 1))
     features_workfunction[:] = np.nan
-
     features_homolumo = np.zeros((len(atoms), 2))
     features_homolumo[:] = np.nan
 
 else:
-
     features_bands = np.zeros((len(atoms), 8))
     features_bands[:] = np.nan
-
     features_workfunction = np.zeros((len(atoms), 1))
     features_workfunction[:] = np.nan
-
-    qe_out.read_bands(scale_band_energies=True)
-    e_fermi = qe_out.e_fermi
-
+    e_bands_dict, e_fermi = read_pw_bands(
+        filename=parsed_args.qe_pwo,
+        scale_band_energies=True,
+    )
     bands = []
-    for kpoint in qe_out.e_bands_dict:
-        bands += qe_out.e_bands_dict[kpoint]
+    for kpoint in e_bands_dict:
+        bands += e_bands_dict[kpoint]
     homo = max([b for b in bands if b <= 0])
     lumo = min([b for b in bands if b > 0])
-
     features_homolumo = np.zeros((len(atoms), 2))
     features_homolumo[:, 0] = homo
     features_homolumo[:, 1] = lumo
@@ -229,13 +187,12 @@ else:
 features_site = np.zeros((len(atoms), 2))
 features_site[:] = np.nan
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # SOAP
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 atoms_copy = atoms.copy()
 atoms_copy.symbols = ["X" for _ in atoms_copy]
-
 soap_desc = SOAP(
     species=["X"],
     periodic=True,
@@ -245,7 +202,6 @@ soap_desc = SOAP(
     sigma=0.35,
     sparse=False,
 )
-
 features_soap = soap_desc.create(atoms_copy)
 
 features = np.hstack((
@@ -269,6 +225,6 @@ if parsed_args.write_out is True:
         filename="features.out",
     )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # END
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
