@@ -1,72 +1,93 @@
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # IMPORTS
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-import ast
 import re
-import pickle
-import numpy as np
-import copy as cp
 import os
 import warnings
-from ase import Atom, Atoms
+import numpy as np
+import copy as cp
+from ase import Atoms
 from ase.io import read
-from ase.io.espresso import read_fortran_namelist, get_atomic_species, SSSP_VALENCE
-from ase.data import atomic_numbers
-from ase.units import create_units
 from ase.constraints import FixAtoms, FixCartesian
-from ase.calculators.singlepoint import SinglePointDFTCalculator
-from ase.calculators.espresso import Espresso
+
 from qe_toolkit.utils import get_symbols_list, get_symbols_dict
 
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO PWO
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# READ PWO
+# -------------------------------------------------------------------------------------
 
 def read_pwo(
-    filename="pw.pwo",
-    index=None,
-    filepwi="pw.pwi",
-    path_head=None,
-    same_path_head=False,
-    **kwargs,
+    filename: str = "pw.pwo",
+    index: int = None,
+    filepwi: str = "pw.pwi",
+    path_head: str = None,
+    initial_magmoms: bool = True,
+    **kwargs: dict,
 ):
-    """Read Quantum Espresso output file."""
-    if path_head is not None:
-        filename = os.path.join(path_head, os.path.split(filename)[1])
-        filepwi = os.path.join(path_head, os.path.split(filepwi)[1])
-    atoms_pwo = read(filename=filename, index=index, **kwargs)
+    """
+    Read Quantum Espresso output file.
+    """
+    # Get files paths.
+    if path_head is None:
+        path_head, filename = os.path.split(filename)
+    filepwo = os.path.join(path_head, filename)
+    if filepwi is not None:
+        filepwi = os.path.join(path_head, filepwi)
+    # Read espresso output file.
+    atoms_pwo = read(filename=filepwo, index=index, format="espresso-out", **kwargs)
     is_list = True
     if not isinstance(atoms_pwo, list):
         atoms_pwo = [atoms_pwo]
         is_list = False
     # Override cell and constraints if filepwi is available.
-    if filepwi and os.path.isfile(filepwi):
-        atoms_pwi = read(filename=filepwi)
-        data, card_lines = read_fortran_namelist(fileobj=open(filepwi))
+    if filepwi is not None and os.path.isfile(filepwi):
+        atoms_pwi = read_pwi(filename=filepwi)
         for atoms in atoms_pwo:
-            atoms.constraints = atoms_pwi.constraints
-            if "vc" not in data["control"].get("calculation", ""):
+            # Copy constraints and info from input file.
+            atoms.constraints = atoms_pwi.constraints.copy()
+            atoms.info = atoms_pwi.info.copy()
+            # Set initial magmoms as input file.
+            if initial_magmoms is True:
+                magmoms = atoms_pwi.get_initial_magnetic_moments()
+                atoms.set_initial_magnetic_moments(magmoms=magmoms)
+            # Update cell for vc-relax and vc-md calculations.
+            if "vc" not in atoms.info["input_data"].get("calculation", "scf"):
                 atoms.set_cell(atoms_pwi.get_cell())
             # This is to not require a new calculation.
-            if atoms.calc:
-                atoms.calc.atoms = atoms
+            atoms.calc.atoms = atoms
     else:
         warnings.warn(f"file {filepwi} not found!")
+        # Get constraints.
+        constraints = read_pwo_constraints(filename=filepwo)
+        for atoms in atoms_pwo:
+            atoms.constraints = constraints.copy()
     if is_list is False:
         atoms_pwo = atoms_pwo[0]
+    # Return atoms.
     return atoms_pwo
 
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO PWI
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# READ PWI
+# -------------------------------------------------------------------------------------
 
-def read_pwi(filename="pw.pwi", path_head=None, **kwargs):
-    """Read Quantum Espresso input file."""
+def read_pwi(
+    filename: str = "pw.pwi",
+    path_head: str = None,
+    apply_constraints: bool = True,
+    **kwargs: dict,
+):
+    """
+    Read Quantum Espresso input file.
+    """
+    from ase.io.espresso import get_atomic_species, read_fortran_namelist
     if path_head is not None:
         filename = os.path.join(path_head, filename)
     # Get atoms.
-    atoms = read(filename=filename, **kwargs)
+    atoms = read(filename=filename, format="espresso-in", **kwargs)
+    # Get constraints.
+    if apply_constraints is True:
+        atoms.constraints = read_pwi_constraints(filename=filename)
     # Get input_data.
     data, card_lines = read_fortran_namelist(fileobj=open(filename))
     input_data = {}
@@ -74,7 +95,7 @@ def read_pwi(filename="pw.pwi", path_head=None, **kwargs):
         input_data.update(data[key])
     atoms.info["input_data"] = input_data
     # Get pseudopotentials.
-    species_card = get_atomic_species(card_lines, n_species=data['system']['ntyp'])
+    species_card = get_atomic_species(card_lines, n_species=data["system"]["ntyp"])
     pseudopotentials = {}
     for species in species_card:
         pseudopotentials[species[0]] = species[2]
@@ -84,471 +105,228 @@ def read_pwi(filename="pw.pwi", path_head=None, **kwargs):
     koffset = None
     for ii, line in enumerate(card_lines):
         if "K_POINTS" in line and "automatic" in line:
-            kpts = [int(ii) for ii in card_lines[ii+1].split()[:3]]
-            koffset = [int(ii) for ii in card_lines[ii+1].split()[3:]]
+            kpts = [int(ii) for ii in card_lines[ii + 1].split()[:3]]
+            koffset = [int(ii) for ii in card_lines[ii + 1].split()[3:]]
     atoms.info["kpts"] = kpts
     atoms.info["koffset"] = koffset
+    # Return atoms.
     return atoms
 
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO OUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# FORCE MULTS TO CONSTRAINTS
+# -------------------------------------------------------------------------------------
 
-# TODO: remove this.
-def read_qe_out(filename="pw.pwo"):
-    """Read Quantum Espresso output."""
-    units = create_units("2006")
-
-    atoms = Atoms(pbc=True)
-    cell = np.zeros((3, 3))
-    energy = None
-    forces = None
-    spin_pol_inp = False
-    spin_pol_out = False
-
-    with open(filename, "r") as fileobj:
-        lines = fileobj.readlines()
-
-    n_nrg = None
-    n_fin = None
-    n_forces = None
-    n_mag_inp = []
-    for nn, line in enumerate(lines):
-        if "positions (alat units)" in line:
-            atomic_pos_units = "alat"
-            n_pos = nn + 1
-        elif "ATOMIC_POSITIONS" in line and "crystal" in line:
-            atomic_pos_units = "crystal"
-            n_pos = nn + 1
-        elif "ATOMIC_POSITIONS" in line and "angstrom" in line:
-            atomic_pos_units = "angstrom"
-            n_pos = nn + 1
-        elif "celldm(1)" in line:
-            celldm = float(line.split()[1]) * units["Bohr"]
-        elif "crystal axes: (cart. coord. in units of alat)" in line:
-            cell_units = "alat"
-            n_cell = nn + 1
-        elif "CELL_PARAMETERS" in line and "angstrom" in line:
-            cell_units = "angstrom"
-            n_cell = nn + 1
-        elif "!" in line:
-            n_nrg = nn
-        elif "Final energy" in line:
-            n_fin = nn
-        elif "Starting magnetic structure" in line and spin_pol_out is False:
-            spin_pol_out = True
-            n_mag_out = nn + 2
-        elif "starting_magnetization" in line:
-            spin_pol_inp = True
-            n_mag_inp += [nn]
-        elif "ATOMIC_SPECIES" in line:
-            n_atom_list = nn + 1
-        elif "Forces acting on atoms" in line:
-            n_forces = nn + 2
-
-    for ii in range(3):
-        line = lines[n_cell + ii]
-        if cell_units == "alat":
-            cell[ii] = [float(cc) * celldm for cc in line.split()[3:6]]
-        elif cell_units == "angstrom":
-            cell[ii] = [float(cc) for cc in line.split()[:3]]
-
-    atoms.set_cell(cell)
-    energy = None
-    if n_nrg is not None:
-        energy = float(lines[n_nrg].split()[4]) * units["Ry"]
-    if n_fin is not None:
-        energy = float(lines[n_fin].split()[3]) * units["Ry"]
-
-    index = 0
-    indices = []
+def force_mults_to_constraints(
+    force_mults: list,
+):
+    """
+    Convert force multipliers into ASE constrainsts.
+    """
     constraints = []
-    translate_constraints = {0: True, 1: False}
-
-    magmoms_dict = {}
-    atoms_list = []
-    if spin_pol_inp is True:
-        for line in lines[n_atom_list:]:
-            if len(line.split()) == 0:
-                break
-            atoms_list += [line.split()[0]]
-        for nn in n_mag_inp:
-            num = ""
-            read = False
-            for ii in lines[nn]:
-                if ii == ")":
-                    read = False
-                if read is True:
-                    num += ii
-                if ii == "(":
-                    read = True
-            magmoms_dict[atoms_list[int(num) - 1]] = float(lines[nn].split()[2])
-
-    if spin_pol_out is True:
-        for line in lines[n_mag_out:]:
-            if len(line.split()) == 0 or line.split()[0] == "End":
-                break
-            magmoms_dict[line.split()[0]] = float(line.split()[1])
-
-    for line in lines[n_pos:]:
-        if len(line.split()) == 0 or line.split()[0] == "End":
-            break
-        if atomic_pos_units == "alat":
-            name = line.split()[1]
-            positions = [[float(ii) * celldm for ii in line.split()[6:9]]]
-            fix = [False, False, False]
+    fix_atoms = []
+    fix_cartesian = []
+    for aa, force_mult in enumerate(force_mults):
+        if force_mult is None:
+            continue
+        mask = [True if mm == 0.0 else False for mm in force_mult]
+        if mask == [True, True, True]:
+            fix_atoms += [aa]
         else:
-            name = line.split()[0]
-            positions = [[float(ii) for ii in line.split()[1:4]]]
-            fix = [translate_constraints[int(ii)] for ii in line.split()[4:]]
-        symbol = ""
-        magmom_tag = ""
-        for ii in range(len(name)):
-            if name[ii].isdigit():
-                magmom_tag += name[ii]
-            else:
-                symbol += name[ii]
-        if spin_pol_inp is True or spin_pol_out is True:
-            magmom = magmoms_dict[name]
-            magmom *= SSSP_VALENCE[atomic_numbers[symbol]]
-            magmoms = [magmom]
-        else:
-            magmoms = [0.0] * len(positions)
-        if atomic_pos_units == "crystal":
-            atoms += Atoms(
-                symbols=symbol,
-                scaled_positions=positions,
-                magmoms=magmoms,
-            )
-        else:
-            atoms += Atoms(
-                symbols=symbol,
-                positions=positions,
-                magmoms=magmoms,
-            )
-        if fix == [True, True, True]:
-            indices.append(index)
-        elif True in fix:
-            constraints.append(FixCartesian([index], fix))
-        index += 1
+            fix_cartesian.append(FixCartesian(a=aa, mask=mask))
+    constraints.append(FixAtoms(indices=fix_atoms))
+    constraints += fix_cartesian
+    # Return constraints.
+    return constraints
 
-    if n_forces is not None:
-        forces = []
-        for ii in range(len(atoms)):
-            line = lines[n_forces + ii]
-            forces.append([float(ff) for ff in line.split()[6:9]])
-        forces = np.array(forces) * units['Ry'] / units['Bohr']
+# -------------------------------------------------------------------------------------
+# READ PWI CONSTRAINTS
+# -------------------------------------------------------------------------------------
 
-    constraints.append(FixAtoms(indices=indices))
-    atoms.set_constraint(constraints)
-    atoms.calc = SinglePointDFTCalculator(atoms)
-    atoms.calc.results.update({"energy": energy})
-    if forces is not None:
-        atoms.calc.results.update({"forces": forces})
+def read_pwi_constraints(
+    filename: str = "pw.pwi",
+):
+    """
+    Read constraints from Quantum Espresso input.
+    """
+    from ase.io.espresso import read_fortran_namelist, get_atomic_positions
+    data, lines = read_fortran_namelist(fileobj=open(filename, "r"))
+    n_atoms = data["system"]["nat"]
+    positions_card = get_atomic_positions(lines=lines, n_atoms=n_atoms)
+    force_mults = [position[2] for position in positions_card]
+    constraints = force_mults_to_constraints(force_mults=force_mults)
+    # Return constraints.
+    return constraints
 
-    return atoms
+# -------------------------------------------------------------------------------------
+# READ PWO CONSTRAINTS
+# -------------------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO OUT
-# -----------------------------------------------------------------------------
-
-# TODO: remove this.
-class ReadQeOut:
-    """Class to read Quantum Espresso output files."""
-    def __init__(self, filename):
-        self.filename = filename
-        self.atoms = None
-
-    def get_atoms(self, cell=None):
-        atoms = read_qe_out(self.filename)
-        if cell is not None:
-            atoms.set_cell(cell)
-        self.atoms = atoms
-        return atoms
-
-    def get_potential_energy(self):
-        if self.atoms is None:
-            atoms = self.get_atoms()
-        else:
-            atoms = self.atoms
-        return atoms.get_potential_energy()
-
-    def read_bands(self, scale_band_energies=True):
-        e_bands_dict, e_fermi = read_pw_bands(
-            filename=self.filename,
-            scale_band_energies=scale_band_energies,
-        )
-        self.e_bands_dict = e_bands_dict
-        self.e_fermi = e_fermi
-        return e_bands_dict, e_fermi
-
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO INP
-# -----------------------------------------------------------------------------
-
-# TODO: remove this.
-def read_qe_inp(filename="pw.pwi"):
-    """Read Quantum Espresso input."""
+def read_pwo_constraints(
+    filename: str = "pw.pwo",
+):
+    """
+    Read constraints from Quantum Espresso output.
+    """
+    from ase.io.espresso import parse_pwo_start, get_atomic_positions
     with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
-    n_as = 0
-    n_kp = 0
-    gamma = False
-    for n, line in enumerate(lines):
-        if "ATOMIC_SPECIES" in line:
-            n_as = n
-        elif "K_POINTS" in line:
-            if "gamma" in line:
-                gamma = True
-            n_kp = n
-    input_data = {}
-    for n, line in enumerate(lines):
-        if (
-            "ATOMIC_SPECIES" in line
-            or "ATOMIC_POSITIONS" in line
-            or "K_POINTS" in line
-            or "CELL_PARAMETERS" in line
-        ):
+    for number, line in reversed(list(enumerate(lines))):
+        if "ATOMIC_POSITIONS" in line:
             break
-        if len(line.strip()) == 0 or line == "\n":
-            pass
-        elif line[0] in ("&", "/"):
-            pass
-        else:
-            keyword, argument = line.split("=")
-            keyword = re.sub(re.compile(r"\s+"), "", keyword)
-            argument = re.sub(re.compile(r"\s+"), "", argument)
-            if ".true." in argument:
-                argument = True
-            elif ".false." in argument:
-                argument = False
-            else:
-                argument = ast.literal_eval(argument)
-            if type(argument) is tuple:
-                argument = argument[0]
-            input_data[keyword] = argument
+    n_atoms = parse_pwo_start(lines=lines)["nat"]
+    positions_card = get_atomic_positions(lines=lines[number:], n_atoms=n_atoms)
+    force_mults = [position[2] for position in positions_card]
+    constraints = force_mults_to_constraints(force_mults=force_mults)
+    # Return constraints.
+    return constraints
 
-    pseudos = {}
-    for n, line in enumerate(lines[n_as + 1 :]):
-        if len(line.strip()) == 0 or line == "\n":
-            break
-        element, MW, pseudo = line.split()
-        pseudos[element] = pseudo
+# -------------------------------------------------------------------------------------
+# READ FERMI ENERGY
+# -------------------------------------------------------------------------------------
 
-    if gamma:
-        kpts = (1, 1, 1)
-        koffset = (0, 0, 0)
-    else:
-        kpts = [int(i) for i in lines[n_kp + 1].split()[:3]]
-        koffset = [int(i) for i in lines[n_kp + 1].split()[3:]]
+def read_Fermi_energy(
+    filename: str = "pw.pwo",
+):
+    """
+    Read Fermi energy from Quantum Espresso output.
+    """
+    atoms = read(filename=filename, index=-1, format="espresso-out")
+    # Return Fermi energy.
+    return atoms.calc.eFermi
 
-    return input_data, pseudos, kpts, koffset
+# -------------------------------------------------------------------------------------
+# READ BANDS
+# -------------------------------------------------------------------------------------
 
-# -----------------------------------------------------------------------------
-# READ QUANTUM ESPRESSO INP
-# -----------------------------------------------------------------------------
+def read_bands(
+    filename: str = "pw.pwo",
+    scale_energies: bool = False,
+):
+    """
+    Read bands from Quantum Espresso output.
+    """
+    atoms = read(filename=filename, index=-1, format="espresso-out")
+    band_list = []
+    for kpt in atoms.calc.kpts:
+        energies = list(kpt.eps_n)
+        if scale_energies is True:
+            energies = [ee - atoms.calc.eFermi for ee in energies]
+        band_list.append({
+            "kpt": kpt.k,
+            "energies": energies,
+            "spin": int(kpt.s),
+            "weight": float(kpt.weight),
+        })
+    # Return list of bands.
+    return band_list
 
-# TODO: remove this.
-class ReadQeInp:
-    """Class to read Quantum Espresso input files."""
-    def __init__(self, filename):
-        self.filename = filename
-        self.atoms = None
-        self.input_data = None
-        self.pseudos = None
-        self.kpts = None
-        self.koffset = None
-        self.label = filename.split(".")[0]
+# -------------------------------------------------------------------------------------
+# READ FILP
+# -------------------------------------------------------------------------------------
 
-    def get_data_pseudos_kpts(self):
-        input_data, pseudos, kpts, koffset = read_qe_inp(self.filename)
-        self.input_data = input_data
-        self.pseudos = pseudos
-        self.kpts = kpts
-        self.koffset = koffset
-        return input_data, pseudos, kpts, koffset
-
-    def get_calculator(self):
-        input_data, pseudos, kpts, koffset = self.get_data_pseudos_kpts()
-        calc = Espresso(
-            input_data=input_data,
-            pseudopotentials=pseudos,
-            kpts=kpts,
-            koffset=koffset,
-            label=self.label,
-        )
-        return calc
-
-    def get_atoms(self):
-        atoms = read_qe_out(self.filename)
-        self.atoms = atoms
-        return atoms
-
-    def update_atoms(self, atoms_new):
-        if self.atoms is None:
-            self.get_atoms()
-        if self.input_data is None:
-            self.get_data_pseudos_kpts()
-        if "calculation" in self.input_data:
-            if self.input_data["calculation"] in ("relax", "md", "vc-relax", "vc-md"):
-                self.atoms.set_positions(atoms_new.get_positions())
-            if self.input_data["calculation"] in ("vc-relax", "vc-md"):
-                self.atoms.set_cell(atoms_new.get_cell())
-        return self.atoms
-
-    def get_input_data_dicts(self, remove_keywords=True):
-        hubbard_U_dict = {}
-        hubbard_J0_dict = {}
-        init_charges_dict = {}
-        if self.atoms is None:
-            self.get_atoms()
-        symbols_list = get_symbols_list(self.atoms)
-        del_keywords = []
-        for keyword in self.input_data:
-            if "Hubbard_U" in keyword:
-                n = int(keyword.split("(", ")")[1])
-                symbol = symbols_list[n - 1]
-                hubbard_U_dict[symbol] = self.input_data[keyword]
-                del_keywords += [keyword]
-
-            elif "Hubbard_J0" in keyword:
-                n = int(keyword.split("(", ")")[1])
-                symbol = symbols_list[n - 1]
-                hubbard_J0_dict[symbol] = self.input_data[keyword]
-                del_keywords += [keyword]
-
-            elif "starting_charge" in keyword:
-                n = int(re.split(r"\(|\)", keyword)[1])
-                symbol = symbols_list[n - 1]
-                init_charges_dict[symbol] = self.input_data[keyword]
-                del_keywords += [keyword]
-                if (
-                    "tot_charge" in self.input_data and 
-                    "tot_charge" not in del_keywords
-                ):
-                    del_keywords += ["tot_charge"]
-
-        if remove_keywords is True:
-            for keyword in del_keywords:
-                del self.input_data[keyword]
-        self.hubbard_U_dict = hubbard_U_dict
-        self.hubbard_J0_dict = hubbard_J0_dict
-        self.init_charges_dict = init_charges_dict
-
-# -----------------------------------------------------------------------------
-# UPDATE PSEUDOS
-# -----------------------------------------------------------------------------
-
-# TODO: remove this.
-def update_pseudos(pseudos, filename):
-    """Update pseudopotentials names."""
-    pseudos_new = read_qe_inp(filename)[1]
-    pseudos.copy()
-    pseudos.update(pseudos_new)
-    return pseudos
-
-# -----------------------------------------------------------------------------
-# READ PW BANDS
-# -----------------------------------------------------------------------------
-
-def read_pw_bands(filename="pw.pwo", scale_band_energies=True):
-    """Read bands from Quantum Espresso output."""
+def read_filp(
+    filename: str = "vmat.dat",
+):
+    """
+    Read filp Quantum Espresso output.
+    """
+    # Read file.
     with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
-    kpt = 0
-    e_bands_dict = {}
-    n_kpts = 0
-    kpts_list = []
-    n_spin = 1
-    read_bands = False
-    for line in lines:
-        if "End of self-consistent calculation" in line:
-            kpt = 0
-            e_bands_dict = {}
-            kpts_list = []
-        if "number of k points" in line:
-            n_kpts = int(line.split()[4])
-        if "SPIN UP" in line:
-            n_spin = 2
-        if " k =" in line:
-            read_bands = True
-            count = 0
-            kpt += 1
-            e_bands_dict[kpt] = []
-            kpts_list += [kpt]
-        if read_bands is True:
-            if count == 1:
-                for i in range(8):
-                    if len(line) > 9*(i+1)+2:
-                        e_bands_dict[kpt] += [float(line[9*i+2:9*(i+1)+2])]
-            if len(line.strip()) == 0 or line == "\n":
-                count += 1
-        if "the Fermi energy is" in line:
-            e_fermi = float(line.split()[4])
-    n_kpts *= n_spin
-    if scale_band_energies is True:
-        for kpt in e_bands_dict:
-            for i in range(len(e_bands_dict[kpt])):
-                e_bands_dict[kpt][i] -= e_fermi
-    return e_bands_dict, e_fermi
+    # Get number of bands and k-points.
+    n_bands = int(re.search(r"nbnd=\s*(\d+)", lines[0]).group(1))
+    n_kpts  = int(re.search(r"nks=\s*(\d+)", lines[0]).group(1))
+    n_cond = int(lines[1].split()[3])
+    n_val = n_bands - n_cond
+    # Calculate block sizes.
+    len_block_cond = n_cond // 5 + (1 if n_cond % 5 != 0 else 0)
+    len_block_bands = len_block_cond * n_val + 1
+    len_block_kpt = 1 + 3 * len_block_bands
+    # Read data.
+    data = []
+    for kk in range(n_kpts):
+        ii_kpt = 1 + kk * len_block_kpt
+        pieces = lines[ii_kpt].split()
+        kpt = [float(pp) for pp in pieces[:3]]
+        bands = {}
+        for jj, xyz in enumerate(["x", "y", "z"]):
+            ii_band = ii_kpt + 1 + jj * len_block_bands
+            values = []
+            for qq in range(ii_band + 1, ii_band + len_block_bands):
+                values.extend([float(xx) for xx in lines[qq].split()])
+            bands[xyz] = np.array(values).reshape((n_val, n_cond))
+        data.append({"kpt": kpt, "n_cond": n_cond, "n_val": n_val, "bands": bands})
+    # Return results.
+    return {"n_bands": n_bands, "n_kpts": n_kpts, "data": data}
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# READ BADER CHARGES
+# -------------------------------------------------------------------------------------
+
+def read_Bader_charges(
+    atoms: Atoms,
+    filename: str = "ACF.dat",
+    filename_out: str = "charges.txt",
+):
+    """
+    Read Bader output and calculate charges
+    """
+    from ase.io.espresso import SSSP_VALENCE
+    charges = []
+    with open(filename, "r") as fileobj:
+        lines = fileobj.readlines()
+        for ii, line in enumerate(lines[2:2 + len(atoms)]):
+            charges.append(SSSP_VALENCE[atoms[ii].number] - float(line.split()[4]))
+    # Write output file.
+    with open(filename_out, "w") as fileobj:
+        for ii, atom in enumerate(atoms):
+            print(f"{ii:4d} {atom.symbol:4s} {charges[ii]:+7.4f}", file=fileobj)
+    # Return charges.
+    return charges
+
+# -------------------------------------------------------------------------------------
 # ASSIGN HUBBARD U
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 def assign_hubbard_U(
-    atoms,
-    pw_data,
-    hubbard_U_dict,
-    hubbard_J0_dict=None,
-    not_in_dict_ok=True,
+    atoms: Atoms,
+    input_data: dict,
+    hubbard_U_dict: dict,
+    hubbard_J0_dict: dict = None,
+    not_in_dict_ok: bool = True,
 ):
-    """Assign Hubbard U parameters in pw parameters data."""
-    symbols_list = get_symbols_list(atoms)
+    """
+    Assign Hubbard U parameters in Quantum Espresso input data.
+    """
+    symbols_list = get_symbols_list(atoms=atoms)
     for ii in range(len(symbols_list)):
         symbol = symbols_list[ii]
         if symbol not in hubbard_U_dict and not_in_dict_ok is True:
-            pw_data["Hubbard_U({})".format(ii + 1)] = 0.
+            input_data[f"Hubbard_U({ii + 1})"] = 0.
         else:
-            pw_data["Hubbard_U({})".format(ii + 1)] = hubbard_U_dict[symbol]
+            input_data[f"Hubbard_U({ii + 1})"] = hubbard_U_dict[symbol]
         if hubbard_J0_dict is not None:
             if symbol not in hubbard_J0_dict and not_in_dict_ok is True:
-                pw_data["Hubbard_J0({})".format(ii + 1)] = 0.
+                input_data[f"Hubbard_J0({ii + 1})"] = 0.
             else:
-                pw_data["Hubbard_J0({})".format(ii + 1)] = hubbard_J0_dict[symbol]
-    pw_data["lda_plus_u"] = True
-    return pw_data
+                input_data[f"Hubbard_J0({ii + 1})"] = hubbard_J0_dict[symbol]
+    input_data["lda_plus_u"] = True
+    # Return updated input data.
+    return input_data
 
-# -----------------------------------------------------------------------------
-# ASSIGN INIT CHARGES
-# -----------------------------------------------------------------------------
-
-def assign_init_charges(atoms, pw_data, init_charges_dict):
-    """Assign initial charges parameters in pw parameters data."""
-    symbols_list = get_symbols_list(atoms)
-    symbols_dict = get_symbols_dict(atoms)
-    i = 0
-    charge_dict = {}
-    tot_charge = 0.0
-    for symbol in symbols_list:
-        charge = init_charges_dict[symbol]
-        if charge != 0.0:
-            charge_dict["starting_charge({})".format(i + 1)] = charge
-            tot_charge += symbols_dict[symbol] * charge
-        i += 1
-    pw_data["tot_charge"] = tot_charge
-    if "system" in pw_data:
-        pw_data["system"].update(charge_dict)
-    else:
-        pw_data["system"] = charge_dict
-    return pw_data
-
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # WRITE QE INPUT BLOCK
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-def write_qe_input_block(fileobj, block_name, block_data, col=23):
-    """Write Quantum Espresso input block."""
+def write_qe_input_block(
+    fileobj: object,
+    block_name: str,
+    block_data: dict,
+    col: int = 23,
+):
+    """
+    Write Quantum Espresso input block.
+    """
     print("&" + block_name, file=fileobj)
     for arg in [arg for arg in block_data if block_data[arg] is not None]:
         if type(block_data[arg]) == str:
@@ -562,156 +340,216 @@ def write_qe_input_block(fileobj, block_name, block_data, col=23):
         print("   {0} = {1}".format(arg.ljust(col), string), file=fileobj)
     print("/", file=fileobj)
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # WRITE DOS INPUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-def write_dos_input(dos_data, filename="dos.pwi", col=23):
-    """Write input for dos calculation."""
+def write_dos_input(
+    dos_data: dict,
+    filename: str = "dos.pwi",
+    col: int = 23,
+):
+    """
+    Write input for DOS calculation.
+    """
     with open(filename, "w+") as fileobj:
         write_qe_input_block(
-            fileobj=fileobj, block_name="DOS", block_data=dos_data, col=col,
+            fileobj=fileobj,
+            block_name="DOS",
+            block_data=dos_data,
+            col=col,
         )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # WRITE PP INPUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-def write_pp_input(pp_data, plot_data, filename="pp.pwi", col=23):
-    """Write input for pp calculation."""
+def write_pp_input(
+    pp_data: dict,
+    plot_data: dict,
+    filename: str = "pp.pwi",
+    col: int = 23,
+):
+    """
+    Write input for pp calculation.
+    """
     with open(filename, "w+") as fileobj:
         write_qe_input_block(
-            fileobj=fileobj, block_name="INPUTPP", block_data=pp_data, col=col,
+            fileobj=fileobj,
+            block_name="INPUTPP",
+            block_data=pp_data,
+            col=col,
         )
         write_qe_input_block(
-            fileobj=fileobj, block_name="PLOT", block_data=plot_data, col=col,
+            fileobj=fileobj,
+            block_name="PLOT",
+            block_data=plot_data,
+            col=col,
         )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # WRITE PROJWFC INPUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-def write_projwfc_input(proj_data, filename="projwfc.pwi", col=23):
-    """Write input for projwfc calculation."""
+def write_projwfc_input(
+    proj_data: dict,
+    filename: str = "projwfc.pwi",
+    col: int = 23,
+):
+    """
+    Write input for Projected Wavefunction calculation.
+    """
     with open(filename, "w+") as fileobj:
         write_qe_input_block(
-            fileobj=fileobj, block_name="PROJWFC", block_data=proj_data, col=col,
+            fileobj=fileobj,
+            block_name="PROJWFC",
+            block_data=proj_data,
+            col=col,
         )
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# WRITE AVERAGE INPUT
+# -------------------------------------------------------------------------------------
+
+def write_average_input(
+    filplots: list = ["filplot"],
+    weigths: list = [1.0],
+    n_points: int = 1000,
+    plane: int = 3,
+    window: float = 1.0,
+    filename: str = "ave.pwi",
+):
+    """
+    Write input for average calculation.
+    """
+    n_files = len(filplots)
+    with open(filename, "w+") as fileobj:
+        print(n_files, file=fileobj)
+        for ii in range(n_files):
+            print(filplots[ii], file=fileobj)
+            print(weigths[ii], file=fileobj)
+        print(n_points, file=fileobj)
+        print(plane, file=fileobj)
+        print(window, file=fileobj)
+
+# -------------------------------------------------------------------------------------
 # WRITE ENVIRON INPUT
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
 def write_environ_input(
-    env_dict, bon_dict, ele_dict, filename="environ.in", reg_list=[], col=23,
+    env_dict: dict,
+    bon_dict: dict,
+    ele_dict: dict,
+    filename: str = "environ.in",
+    regions_list: list = [],
+    col: int = 23,
 ):
-    """Write input for Environ calculation."""
-    fileobj = open(filename, "w+")
-    block_name = "ENVIRON"
-    write_qe_input_block(
-        fileobj=fileobj, block_name=block_name, block_data=env_dict, col=col
-    )
-    block_name = "BOUNDARY"
-    write_qe_input_block(
-        fileobj=fileobj, block_name=block_name, block_data=bon_dict, col=col
-    )
-    block_name = "ELECTROSTATIC"
-    write_qe_input_block(
-        fileobj=fileobj, block_name=block_name, block_data=ele_dict, col=col
-    )
-    if len(reg_list) > 0:
-        print("\nDIELECTRIC_REGIONS angstrom", file=fileobj)
-        for reg in reg_list:
-            print("{:.4f}".format(reg.eps_stat), end=" ", file=fileobj)
-            print("{:.4f}".format(reg.eps_opt), end=" ", file=fileobj)
-            print("{:.14f}".format(reg.position[0]), end=" ", file=fileobj)
-            print("{:.14f}".format(reg.position[1]), end=" ", file=fileobj)
-            print("{:.14f}".format(reg.position[2]), end=" ", file=fileobj)
-            print("{:.14f}".format(reg.width), end=" ", file=fileobj)
-            print("{:.4f}".format(reg.spread), end=" ", file=fileobj)
-            print(reg.dim, end=" ", file=fileobj)
-            print(reg.axis, file=fileobj)
-    fileobj.close()
+    """
+    Write input for Environ calculation.
+    """
+    with open(filename, "w+") as fileobj:
+        write_qe_input_block(
+            fileobj=fileobj,
+            block_name="ENVIRON",
+            block_data=env_dict,
+            col=col,
+        )
+        write_qe_input_block(
+            fileobj=fileobj,
+            block_name="BOUNDARY",
+            block_data=bon_dict,
+            col=col,
+        )
+        write_qe_input_block(
+            fileobj=fileobj,
+            block_name="ELECTROSTATIC",
+            block_data=ele_dict,
+            col=col,
+        )
+        if len(regions_list) > 0:
+            print("\nDIELECTRIC_REGIONS angstrom", file=fileobj)
+            for reg in regions_list:
+                print("{:.4f}".format(reg["eps_stat"]), end=" ", file=fileobj)
+                print("{:.4f}".format(reg["eps_opt"]), end=" ", file=fileobj)
+                print("{:.14f}".format(reg["position"][0]), end=" ", file=fileobj)
+                print("{:.14f}".format(reg["position"][1]), end=" ", file=fileobj)
+                print("{:.14f}".format(reg["position"][2]), end=" ", file=fileobj)
+                print("{:.14f}".format(reg["width"]), end=" ", file=fileobj)
+                print("{:.4f}".format(reg["spread"]), end=" ", file=fileobj)
+                print("{}".format(reg["dim"]), end=" ", file=fileobj)
+                print("{}".format(reg["axis"]), file=fileobj)
 
-# -----------------------------------------------------------------------------
-# DIELECTRIC REGION
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
+# READ CUBE
+# -------------------------------------------------------------------------------------
 
-class DielectricRegion:
-    def __init__(
-        self,
-        eps_stat=None,
-        eps_opt=None,
-        position=None,
-        width=None,
-        spread=None,
-        dim=None,
-        axis=None,
-    ):
-        self.eps_stat = eps_stat
-        self.eps_opt = eps_opt
-        self.position = position
-        self.width = width
-        self.spread = spread
-        self.dim = dim
-        self.axis = axis
-
-# -----------------------------------------------------------------------------
-# READ AXSF
-# -----------------------------------------------------------------------------
-
-def read_axsf(filename):
-    """Read Xcrysden animation file."""
+def read_cube(
+    filename: str,
+):
+    """
+    Read a cube file and return the origin, lattice vectors, and data.
+    """
     with open(filename, "r") as fileobj:
         lines = fileobj.readlines()
+    # Cube header.
+    n_atoms = int(lines[2].split()[0])
+    origin = np.array([float(xx) for xx in lines[2].split()[1:4]])
+    # Lattice vectors and grid dimensions.
+    nx, ax, ay, az = lines[3].split()
+    ny, bx, by, bz = lines[4].split()
+    nz, cx, cy, cz = lines[5].split()
+    nx, ny, nz = int(nx), int(ny), int(nz)
+    a_vect = np.array([float(ax), float(ay), float(az)])
+    b_vect = np.array([float(bx), float(by), float(bz)])
+    c_vect = np.array([float(cx), float(cy), float(cz)])
+    # Get data.
+    values = []
+    for line in lines[6 + n_atoms:]:
+        values.extend([float(xx) for xx in line.split()])
+    data = np.array(values).reshape((nx, ny, nz))
+    # Return origin, lattice vectors, and data.
+    return origin, a_vect, b_vect, c_vect, data
 
-    for line in lines:
-        if "PRIMCOORD" in line:
-            key = "PRIMCOORD"
-            break
-        elif "ATOMS" in line:
-            key = "ATOMS"
-            break
+# -------------------------------------------------------------------------------------
+# CHECK FINISHED
+# -------------------------------------------------------------------------------------
 
-    if key == "PRIMCOORD":
-        for n, line in enumerate(lines):
-            if "PRIMVEC" in line:
-                break
-        cell_vectors = np.zeros((3, 3))
-        for i, line in enumerate(lines[n + 1 : n + 4]):
-            entries = line.split()
-            cell_vectors[i][0] = float(entries[0])
-            cell_vectors[i][1] = float(entries[1])
-            cell_vectors[i][2] = float(entries[2])
-        atoms_zero = Atoms(cell=cell_vectors, pbc=(True, True, True))
-        increment = 2
+def check_finished(
+    filename: str,
+    calculation: str,
+    finish_keys: dict = {},
+):
+    """
+    Check if the calculation is finished.
+    """
+    finish_keys_all = {
+        "scf": "End of self-consistent calculation",     
+        "nscf": "End of band structure calculation",
+        "bands": "End of band structure calculation",
+        "relax": "Final energy",
+        "md": "End of molecular dynamics calculation",
+        "vc-relax": "Final enthalpy",
+        "vc-md": "End of molecular dynamics calculation",
+    }
+    finish_keys_all.update(finish_keys)
+    key = finish_keys_all[calculation]
+    # Search the file.
+    with open(filename, "r") as file:
+        for line in reversed(file.readlines()):
+            if key in line:
+                return True
+    return False
 
-    elif key == "ATOMS":
-        atoms_zero = Atoms(pbc=(False, False, False))
-        increment = 1
-
-    key = "PRIMCOORD"
-    animation = []
-    for n, line in enumerate(lines):
-        if key in line:
-            atoms = Atoms(cell=cell_vectors, pbc=(True, True, True))
-            for line in lines[n + increment :]:
-                entr = line.split()
-                if entr[0] == key:
-                    break
-                symbol = entr[0]
-                position = (float(entr[1]), float(entr[2]), float(entr[3]))
-                atoms += Atom(symbol, position=position)
-            animation += [atoms]
-
-    return animation
-
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # GET PSEUDOPOTENTIALS NAMES
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 
-def get_pseudopotentials_names(library="SSSP efficiency"):
-    """Pseudopotentials names from the SSSP library."""
+def get_pseudopotentials_names(
+    library: str = "SSSP efficiency",
+):
+    """
+    Pseudopotentials names from the SSSP library.
+    """
     if library == "SSSP efficiency":
         pseudopotentials = {
             "Ag": "Ag_ONCV_PBE-1.0.oncvpsp.upf",
@@ -802,9 +640,9 @@ def get_pseudopotentials_names(library="SSSP efficiency"):
         }
     else:
         raise NameError("implemented libraries: SSSP efficiency")
-
+    # Return pseudopotentials.
     return pseudopotentials
 
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------
 # END
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------

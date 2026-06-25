@@ -6,13 +6,12 @@
 
 import matplotlib
 matplotlib.use("Agg")
-import os
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from ase import units
 
-from qe_toolkit.io import write_pp_input, write_average_input, read_Fermi_energy
+from qe_toolkit.io import read_cube, read_Fermi_energy
 
 # -------------------------------------------------------------------------------------
 # MAIN
@@ -21,45 +20,22 @@ from qe_toolkit.io import write_pp_input, write_average_input, read_Fermi_energy
 def main():
     # Parameters.
     filename_pwo = "pw.pwo"
-    # Quantum Espresso bin.
-    qe_bindir = "/home/rcheula/espresso/qe-7.5/bin/"
-    mpi_cmds = ""
     # Read Fermi energy.
     e_fermi = read_Fermi_energy(filename=filename_pwo)
-    # Change directory.
-    cwd = os.getcwd()
-    os.makedirs("potential", exist_ok=True)
-    os.chdir("potential")
-    if not os.path.isfile("avg.dat"):
-        # Write PP input.
-        pp_data = {"outdir": "../calc", "filplot": "filplot", "plot_num": 11}
-        write_pp_input(pp_data=pp_data, plot_data={}, filename="pp.pwi")
-        # Write average input.
-        write_average_input(filplots=["filplot"], weigths=[1.0])
-        # Run PP and average.
-        os.system(f"{mpi_cmds} {qe_bindir}pp.x < pp.pwi > pp.pwo")
-        os.system(f"{mpi_cmds} {qe_bindir}average.x < ave.pwi > ave.pwo")
-    # Read average data.
-    with open("avg.dat", "r") as fileobj:
-        lines = fileobj.readlines()
-    z_vect = []
-    v_vect = []
-    for line in lines:
-        line_split = line.split()
-        z_vect += [float(line_split[0]) * units.Bohr]
-        v_vect += [float(line_split[1]) * units.Ry]
-    step = z_vect[1] - z_vect[0]
-    z_vect = np.array(z_vect) + step / 2
-    v_vect = np.array(v_vect)
-    # Change back directory.
-    os.chdir(cwd)
+    # Get potential from cube file.
+    origin, a_vect, b_vect, c_vect, v_data = read_cube("velectrostatic.cube")
+    # Average potential in xy plane.
+    v_vect = v_data.mean(axis=(0, 1)) * units.Ha
+    # Get z coordinates.
+    step = np.linalg.norm(c_vect) * units.Bohr
+    z_vect = np.arange(len(v_vect)) * step + step / 2
     # Plot potential.
     plt.xlim([0, max(z_vect) + step / 2])
-    plt.xlabel("z [A]")
+    plt.xlabel("z [Å]")
     plt.ylabel("V [eV]")
     plt.plot(z_vect, v_vect)
     plt.tight_layout()
-    plt.savefig("potential.png", dpi=300)
+    plt.savefig("potential_environ.png", dpi=300)
     # Calculate work function.
     e_vacuum = float(np.mean(v_vect[:3] + v_vect[-3:]))
     workfunction = e_vacuum - e_fermi

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qe_toolkit"
+version = "0.0.2"
+description = "Toolkit to prepare input files and read output files for Quantum Espresso."
+readme = "README.md"
+requires-python = ">=3.8, <4"
+license = { text = "GPL-3.0" }
+authors = [
+  { name = "Raffaele Cheula", email = "cheula.raffaele@gmail.com" }
+]
+urls = { "Source" = "https://github.com/raffaelecheula/qe_toolkit.git" }
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "ase",
+    "PyYAML",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qe_toolkit*"]
+exclude = ["examples*"]
