@@ -260,6 +260,31 @@ def read_filp(
     return {"n_bands": n_bands, "n_kpts": n_kpts, "data": data}
 
 # -------------------------------------------------------------------------------------
+# READ BEEF ENERGIES
+# -------------------------------------------------------------------------------------
+
+def read_BEEF_energies(
+    filename: str,
+) -> np.ndarray:
+    """
+    Read BEEF ensemble energies from file.
+    """
+    from ase.units import create_units
+    units = create_units("2006")
+    energies = []
+    with open(filename, "r") as fileobj:
+        read = False
+        for line in fileobj:
+            if len(line.strip()) < 2 and read is True:
+                break
+            if read is True:
+                energies.append(float(line.split()[0]) * units["Ry"])
+            if "ensemble energies" in line:
+                read = True
+    # Return energies.
+    return np.array(energies)
+
+# -------------------------------------------------------------------------------------
 # READ BADER CHARGES
 # -------------------------------------------------------------------------------------
 
@@ -526,6 +551,7 @@ def check_finished(
         "scf": "End of self-consistent calculation",     
         "nscf": "End of band structure calculation",
         "bands": "End of band structure calculation",
+        "ensemble": "End of self-consistent calculation",  
         "relax": "Final energy",
         "md": "End of molecular dynamics calculation",
         "vc-relax": "Final enthalpy",
